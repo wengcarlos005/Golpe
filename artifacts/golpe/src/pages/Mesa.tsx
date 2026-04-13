@@ -12,7 +12,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
   const [alvoId, setAlvoId] = useState<string | null>(null);
   const [timerPercent, setTimerPercent] = useState(100);
   const [tempoRestante, setTempoRestante] = useState(30);
-  const logRef = useRef<HTMLDivElement>(null);
+  const executandoRef = useRef(false);
 
   const passarTurno = useCallback(async () => {
     const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
@@ -30,45 +30,77 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       acaoPendente: null,
     });
     setAlvoId(null);
+    executandoRef.current = false;
   }, [minhaInfo.sala]);
 
+  const perderCarta = useCallback(
+    async (id: string, cb: () => void) => {
+      const snap = await get(
+        ref(db, `salas/${minhaInfo.sala}/jogadores/${id}/cartas`)
+      );
+      const cartas = (snap.val() as string[]) || [];
+      cartas.shift();
+      await set(
+        ref(db, `salas/${minhaInfo.sala}/jogadores/${id}/cartas`),
+        cartas
+      );
+      cb();
+    },
+    [minhaInfo.sala]
+  );
+
   const executarEfeito = useCallback(async () => {
+    if (executandoRef.current) return;
+    executandoRef.current = true;
+
     const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
     const d = snap.val() as Sala;
-    if (!d) return;
+    if (!d) { executandoRef.current = false; return; }
     const a = d.acaoPendente as AcaoPendente;
-    if (!a) return;
+    if (!a) { executandoRef.current = false; return; }
+
     const aut = d.jogadores![a.autorId];
     const upd: Record<string, unknown> = {};
 
-    if (a.tipo === "Político") upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 3;
-    if (a.tipo === "Trabalhar") upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 1;
-    if (a.tipo === "Propina") {
-      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas - 4 + 3;
+    if (a.tipo === "Político") {
+      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 3;
+    }
+    if (a.tipo === "Ajuda Externa") {
+      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 2;
+    }
+    if (a.tipo === "Trabalhar") {
+      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 1;
+    }
+    if (a.tipo === "Bicheiro") {
+      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 2;
       upd[`jogadores/${a.alvoId!}/moedas`] = Math.max(
         0,
-        d.jogadores![a.alvoId!].moedas - 3
+        d.jogadores![a.alvoId!].moedas - 2
       );
+    }
+    if (a.tipo === "Bandido") {
+      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas - 3;
     }
     if (a.tipo === "Golpe") {
       upd[`jogadores/${a.autorId}/moedas`] = aut.moedas - 7;
-      const cAlvo = d.jogadores![a.alvoId!].cartas || [];
-      if (cAlvo.length > 0) upd[`jogadores/${a.alvoId!}/cartas`] = cAlvo.slice(1);
     }
+
     upd.fase = "ACAO";
     upd.acaoPendente = null;
     await update(ref(db, `salas/${minhaInfo.sala}`), upd);
-    await passarTurno();
-  }, [minhaInfo.sala, passarTurno]);
+
+    if (a.tipo === "Bandido" || a.tipo === "Golpe") {
+      await perderCarta(a.alvoId!, passarTurno);
+    } else {
+      await passarTurno();
+    }
+  }, [minhaInfo.sala, passarTurno, perderCarta]);
 
   useEffect(() => {
     const salaRef = ref(db, `salas/${minhaInfo.sala}`);
     const unsub = onValue(salaRef, (snap) => {
       const data = snap.val() as Sala;
       setSala(data);
-      if (logRef.current) {
-        logRef.current.scrollTop = logRef.current.scrollHeight;
-      }
     });
     return () => unsub();
   }, [minhaInfo.sala]);
@@ -87,11 +119,11 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       setTimerPercent(Math.max(0, (restante / total) * 100));
       setTempoRestante(Math.max(0, Math.floor(restante / 1000)));
 
-      if (restante <= 0) {
-        if (d.fase !== "ACAO") {
-          if (d.vezDe === minhaInfo.id) await executarEfeito();
-        } else if (d.vezDe === minhaInfo.id) {
+      if (restante <= 0 && d.vezDe === minhaInfo.id && !executandoRef.current) {
+        if (d.fase === "ACAO") {
           await passarTurno();
+        } else {
+          await executarEfeito();
         }
       }
     }, 500);
@@ -106,40 +138,33 @@ export default function Mesa({ minhaInfo }: MesaProps) {
   }
 
   async function pedirAcao(tipo: string) {
-    if (["Propina", "X9", "Golpe"].includes(tipo) && !alvoId) {
+    if (["Bicheiro", "Bandido", "Golpe"].includes(tipo) && !alvoId) {
       alert("Selecione um alvo clicando em um jogador!");
       return;
     }
 
-    const snap = await get(ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/moedas`));
+    const snap = await get(
+      ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/moedas`)
+    );
     const moedas = snap.val() as number;
 
-    if (tipo === "Propina" && moedas < 4) {
-      alert("Propina exige 4 moedas de entrada!");
+    if (tipo === "Bandido" && moedas < 3) {
+      alert("Bandido exige 3 moedas!");
+      return;
+    }
+    if (tipo === "Golpe" && moedas < 7) {
+      alert("Golpe exige 7 moedas!");
       return;
     }
 
-    await processarAcao(tipo);
-  }
-
-  async function processarAcao(tipo: string) {
-    const fase =
-      tipo === "Trabalhar" || tipo === "Golpe" ? "EXECUCAO" : "DUVIDA";
+    const fase = tipo === "Trabalhar" || tipo === "Golpe" ? "EXECUCAO" : "DUVIDA";
     await update(ref(db, `salas/${minhaInfo.sala}`), {
       acaoPendente: { autorId: minhaInfo.id, tipo, alvoId: alvoId || null },
       fase,
-      timerFinal: Date.now() + (fase === "DUVIDA" ? 10000 : 30000),
+      timerFinal: Date.now() + 10000,
     });
     await adicionarLog(`@${minhaInfo.nome} usou ${tipo}`);
     if (fase === "EXECUCAO") await executarEfeito();
-  }
-
-  async function perderCarta(id: string, cb: () => void) {
-    const snap = await get(ref(db, `salas/${minhaInfo.sala}/jogadores/${id}/cartas`));
-    const cartas = (snap.val() as string[]) || [];
-    cartas.shift();
-    await set(ref(db, `salas/${minhaInfo.sala}/jogadores/${id}/cartas`), cartas);
-    cb();
   }
 
   async function reagir(r: string) {
@@ -160,34 +185,18 @@ export default function Mesa({ minhaInfo }: MesaProps) {
         timerFinal: Date.now() + 10000,
       });
     } else {
-      if (d.fase === "DUVIDA" && ["Propina", "X9"].includes(a.tipo)) {
+      if (
+        d.fase === "DUVIDA" &&
+        ["Bicheiro", "Bandido", "Ajuda Externa"].includes(a.tipo)
+      ) {
         await update(ref(db, `salas/${minhaInfo.sala}`), {
           fase: "BLOQUEIO",
           timerFinal: Date.now() + 10000,
         });
       } else {
-        if (a.tipo === "X9") {
-          await update(ref(db, `salas/${minhaInfo.sala}`), {
-            fase: "REVELAR_ESCOLHA",
-            timerFinal: Date.now() + 10000,
-          });
-        } else {
-          await executarEfeito();
-        }
+        await executarEfeito();
       }
     }
-  }
-
-  async function mostrarCartaAoX9(idx: number) {
-    const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
-    const d = snap.val() as Sala;
-    const carta = (d.jogadores![minhaInfo.id].cartas || [])[idx];
-    alert(`Você mostrou ${carta} ao investigador!`);
-    await update(ref(db, `salas/${minhaInfo.sala}`), {
-      fase: "ACAO",
-      acaoPendente: null,
-    });
-    await passarTurno();
   }
 
   if (!sala) {
@@ -206,18 +215,23 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     (id) => (jogadores[id].cartas || []).length > 0
   );
   const vencedor = ativos.length === 1 ? jogadores[ativos[0]] : null;
+  const minhasMoedas = eu?.moedas ?? 0;
 
   return (
     <div className="mesa-wrapper">
       <div className="ui-mesa-completa">
-        {/* LOG */}
-        <div className="log-container" ref={logRef}>
+        {/* LOG — newest at top (column-reverse) */}
+        <div className="log-container">
+          {(sala.log || [])
+            .slice()
+            .reverse()
+            .slice(0, 20)
+            .map((msg, i) => (
+              <div key={i} className="action-msg">
+                {msg}
+              </div>
+            ))}
           <div className="log-titulo">HISTÓRICO</div>
-          {(sala.log || []).slice(-12).map((msg, i) => (
-            <div key={i} className="action-msg">
-              <span>{msg}</span>
-            </div>
-          ))}
         </div>
 
         {/* ADVERSÁRIOS */}
@@ -234,19 +248,22 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                   className={`player-card ${isVez ? "active-turn" : ""} ${isAlvo ? "target-selected" : ""} ${!vivo ? "eliminado" : ""}`}
                   onClick={() => vivo && setAlvoId(id === alvoId ? null : id)}
                 >
-                  <div className="player-avatar">{j.nome.charAt(0).toUpperCase()}</div>
+                  <div className="player-avatar">
+                    {j.nome.charAt(0).toUpperCase()}
+                  </div>
                   <div className="player-nome">{j.nome}</div>
                   <div className="player-status">
                     {vivo ? (
                       <span className="moedas-badge">💰 {j.moedas}</span>
                     ) : (
-                      <span className="eliminado-badge">ELIMINADO</span>
+                      <span className="eliminado-badge">💀</span>
                     )}
                   </div>
-                  {isVez && <div className="vez-indicator">VEZ</div>}
-                  {(j.cartas || []).length > 0 && (
+                  {isVez && vivo && <div className="vez-indicator">VEZ</div>}
+                  {vivo && (
                     <div className="cartas-count">
-                      {(j.cartas || []).length} carta{(j.cartas || []).length !== 1 ? "s" : ""}
+                      {(j.cartas || []).length} carta
+                      {(j.cartas || []).length !== 1 ? "s" : ""}
                     </div>
                   )}
                 </div>
@@ -300,50 +317,70 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                 {sala.fase === "ACAO" && sala.vezDe === minhaInfo.id && (
                   <>
                     <div className="acoes-titulo">SUA VEZ — Escolha uma ação:</div>
+
                     <button
                       className="btn-acao btn-amarelo"
                       onClick={() => pedirAcao("Político")}
                     >
-                      <span className="acao-nome">Político</span>
+                      <span className="acao-nome">🏛️ Político</span>
                       <span className="acao-desc">+3 💰 (pode ser desafiado)</span>
                     </button>
+
                     <button
                       className="btn-acao btn-amarelo"
-                      onClick={() => pedirAcao("Propina")}
+                      onClick={() => pedirAcao("Ajuda Externa")}
                     >
-                      <span className="acao-nome">Propina</span>
-                      <span className="acao-desc">Rouba 3 💰 do alvo</span>
+                      <span className="acao-nome">🤝 Ajuda Externa</span>
+                      <span className="acao-desc">+2 💰 (Político bloqueia)</span>
                     </button>
+
                     <button
                       className="btn-acao btn-amarelo"
-                      onClick={() => pedirAcao("X9")}
+                      onClick={() => pedirAcao("Bicheiro")}
                     >
-                      <span className="acao-nome">Investigar (X9)</span>
-                      <span className="acao-desc">Vê carta do alvo</span>
+                      <span className="acao-nome">🎰 Bicheiro</span>
+                      <span className="acao-desc">Rouba 2 💰 do alvo</span>
                     </button>
+
+                    {minhasMoedas >= 3 && (
+                      <button
+                        className="btn-acao btn-vermelho"
+                        onClick={() => pedirAcao("Bandido")}
+                      >
+                        <span className="acao-nome">🔪 Bandido</span>
+                        <span className="acao-desc">Assassina alvo (-3 💰)</span>
+                      </button>
+                    )}
+
                     <button
                       className="btn-acao btn-cinza"
                       onClick={() => pedirAcao("Trabalhar")}
                     >
-                      <span className="acao-nome">Trabalhar</span>
+                      <span className="acao-nome">⚒️ Trabalhar</span>
                       <span className="acao-desc">+1 💰 (sempre funciona)</span>
                     </button>
-                    {(eu?.moedas || 0) >= 7 && (
+
+                    {minhasMoedas >= 7 && (
                       <button
                         className="btn-acao btn-vermelho"
                         onClick={() => pedirAcao("Golpe")}
                       >
-                        <span className="acao-nome">DAR GOLPE</span>
+                        <span className="acao-nome">💥 DAR GOLPE</span>
                         <span className="acao-desc">-7 💰 · Elimina carta do alvo</span>
                       </button>
                     )}
-                    {alvoId && (
+
+                    {alvoId ? (
                       <div className="alvo-selecionado">
                         Alvo: <strong>{jogadores[alvoId]?.nome}</strong>
-                        <button className="btn-limpar-alvo" onClick={() => setAlvoId(null)}>✕</button>
+                        <button
+                          className="btn-limpar-alvo"
+                          onClick={() => setAlvoId(null)}
+                        >
+                          ✕
+                        </button>
                       </div>
-                    )}
-                    {!alvoId && (
+                    ) : (
                       <div className="hint-alvo">
                         Clique em um jogador para selecionar como alvo
                       </div>
@@ -359,15 +396,15 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                         className="btn-acao btn-azul"
                         onClick={() => reagir("DUVIDO")}
                       >
-                        <span className="acao-nome">DUVIDAR!</span>
-                        <span className="acao-desc">Desafiar a ação</span>
+                        <span className="acao-nome">🤔 DUVIDAR!</span>
+                        <span className="acao-desc">Desafiar — se ganhar, autor perde carta</span>
                       </button>
                       <button
                         className="btn-acao btn-cinza"
                         onClick={() => reagir("PASSAR")}
                       >
-                        <span className="acao-nome">ACEITAR</span>
-                        <span className="acao-desc">Deixar passar</span>
+                        <span className="acao-nome">✓ ACEITAR</span>
+                        <span className="acao-desc">Deixar a ação prosseguir</span>
                       </button>
                     </>
                   )}
@@ -380,39 +417,31 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                         className="btn-acao btn-azul"
                         onClick={() => reagir("BLOQUEIO")}
                       >
-                        <span className="acao-nome">BLOQUEAR</span>
-                        <span className="acao-desc">Impedir a ação</span>
+                        <span className="acao-nome">🛡️ BLOQUEAR</span>
+                        <span className="acao-desc">Usar personagem para impedir</span>
                       </button>
                       <button
                         className="btn-acao btn-cinza"
                         onClick={() => reagir("PASSAR")}
                       >
-                        <span className="acao-nome">ACEITAR</span>
+                        <span className="acao-nome">✓ ACEITAR</span>
                         <span className="acao-desc">Deixar acontecer</span>
                       </button>
                     </>
                   )}
 
-                {sala.fase === "REVELAR_ESCOLHA" &&
-                  sala.acaoPendente?.alvoId === minhaInfo.id && (
-                    <>
-                      <div className="acoes-titulo">MOSTRAR UMA CARTA:</div>
-                      {minhasCartas.map((c, i) => (
-                        <button
-                          key={i}
-                          className="btn-acao btn-amarelo"
-                          onClick={() => mostrarCartaAoX9(i)}
-                        >
-                          <span className="acao-nome">Mostrar {c}</span>
-                        </button>
-                      ))}
-                    </>
-                  )}
-
                 {((sala.fase === "ACAO" && sala.vezDe !== minhaInfo.id) ||
-                  (sala.fase === "DUVIDA" && sala.acaoPendente?.autorId === minhaInfo.id)) && (
+                  (sala.fase === "DUVIDA" &&
+                    sala.acaoPendente?.autorId === minhaInfo.id)) && (
                   <div className="aguardando-msg">
-                    Aguardando {jogadores[sala.vezDe!]?.nome || "outro jogador"}...
+                    Aguardando{" "}
+                    {jogadores[sala.vezDe!]?.nome || "outro jogador"}...
+                  </div>
+                )}
+
+                {sala.fase === "DUVIDA_BLOQUEIO" && (
+                  <div className="aguardando-msg">
+                    Bloco em andamento...
                   </div>
                 )}
               </>
@@ -424,7 +453,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
         <div className="meu-status">
           <div className="minha-identidade">
             <div className="meu-nome">{minhaInfo.nome}</div>
-            <div className="minhas-moedas">💰 {eu?.moedas ?? 0}</div>
+            <div className="minhas-moedas">💰 {minhasMoedas}</div>
           </div>
           <div className="minhas-cartas">
             {minhasCartas.map((c, i) => (

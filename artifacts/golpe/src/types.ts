@@ -34,8 +34,35 @@ export interface MinhaInfo {
 export const PERSONAGENS = [
   "Político",
   "Bicheiro",
+  "Bandido",
   "X9",
   "Juiz",
   "Miliciano",
-  "Segurança",
 ];
+
+export const PERSONAGEM_INFO: Record<string, { emoji: string; desc: string }> = {
+  Político: {
+    emoji: "🏛️",
+    desc: "Ganha 3 moedas. Bloqueia Ajuda Externa.",
+  },
+  Bicheiro: {
+    emoji: "🎰",
+    desc: "Rouba 2 moedas de um alvo. Miliciano bloqueia.",
+  },
+  Bandido: {
+    emoji: "🔪",
+    desc: "Assassina (alvo perde carta). Custa 3 moedas. Miliciano bloqueia.",
+  },
+  X9: {
+    emoji: "🕵️",
+    desc: "Investiga uma carta do alvo.",
+  },
+  Juiz: {
+    emoji: "⚖️",
+    desc: "Bloqueia investigação do X9.",
+  },
+  Miliciano: {
+    emoji: "🛡️",
+    desc: "Bloqueia Bandido e Bicheiro.",
+  },
+};
