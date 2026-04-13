@@ -23,6 +23,8 @@ export interface Sala {
   acaoPendente?: AcaoPendente | null;
   jogadores?: Record<string, Jogador>;
   quemPerde?: string | null;
+  bloqueadorId?: string | null;
+  bloqueadorPersonagem?: string | null;
 }
 
 export interface MinhaInfo {
