@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOLPE - Blefe e Poder</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <style>
+        :root { --yellow: #ffcc00; --gold: #ffd700; --bg-dark: #0a0a0a; --panel: #1c1c26; --text: #ffffff; }
+        body, html { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg-dark); color: var(--text); overflow: hidden; }
+
+        /* --- NAVEGAÇÃO --- */
+        .screen { display: none; min-height: 100vh; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
+        .active { display: flex; }
+
+        /* --- HOME & LOGIN (Baseado na ID Visual) --- */
+        .logo-main { font-size: 80px; font-weight: 900; color: var(--yellow); margin: 0; text-shadow: 0 0 20px rgba(255, 204, 0, 0.4); }
+        .btn-yellow { background: var(--yellow); color: #000; border: none; padding: 15px 40px; border-radius: 30px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        .btn-yellow:disabled { background: #444; cursor: not-allowed; }
+        .card-auth { background: var(--panel); padding: 40px; border-radius: 20px; width: 100%; max-width: 400px; text-align: center; border: 1px solid #333; }
+        input { background: #252533; border: 1px solid #444; color: white; padding: 12px; border-radius: 8px; width: 100%; margin: 10px 0; box-sizing: border-box; }
+
+        /* --- MESA PREMIUM (Layout image_8361a1.png) --- */
+        #ui-mesa-completa {
+            display: grid;
+            grid-template-columns: 280px 1fr 300px;
+            grid-template-rows: 140px 1fr 180px;
+            gap: 15px; height: 100vh; padding: 15px;
+            background: radial-gradient(circle at center, #1a1a2e 0%, #050505 100%);
+        }
+
+        .log-container { 
+            grid-row: 1 / 3; background: rgba(255, 255, 255, 0.03); 
+            border-radius: 15px; border: 1px solid rgba(255, 215, 0, 0.1); 
+            padding: 15px; overflow-y: auto; display: flex; flex-direction: column;
+        }
+
+        .action-msg { font-size: 0.8em; padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-left: 3px solid var(--gold); border-radius: 4px; display: flex; justify-content: space-between; }
+
+        .adversarios-topo { grid-column: 2 / 3; display: flex; justify-content: center; gap: 15px; align-items: center; }
+        .player-card { 
+            background: #121212; border: 2px solid #333; border-radius: 12px; 
+            padding: 10px; width: 95px; text-align: center; cursor: pointer; transition: 0.3s;
+        }
+        .player-card.active-turn { border-color: var(--gold); box-shadow: 0 0 10px var(--gold); }
+        .player-card.target-selected { border-color: #2196f3; box-shadow: 0 0 10px #2196f3; }
+
+        .mesa-central { grid-column: 2 / 3; grid-row: 2 / 3; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #mesa-diamante { width: 160px; height: 160px; border: 2px solid rgba(255,215,0,0.3); transform: rotate(45deg); display: flex; align-items: center; justify-content: center; }
+        #mesa-texto { transform: rotate(-45deg); font-weight: bold; text-align: center; color: var(--gold); }
+
+        .menu-acoes { 
+            grid-column: 3 / 4; grid-row: 1 / 4; background: rgba(0,0,0,0.6); 
+            border-radius: 15px; padding: 25px; border: 1px solid #333;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+
+        .meu-status { grid-column: 1 / 3; grid-row: 3 / 4; display: flex; align-items: center; gap: 30px; padding-left: 30px; }
+        .minha-carta { width: 110px; height: 155px; background: #fff; color: #000; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9em; text-align: center; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); }
+
+        #timer-bar { width: 100%; height: 8px; background: #222; border-radius: 4px; overflow: hidden; margin-bottom: 5px; }
+        #timer-fill { height: 100%; background: #ff5252; width: 100%; transition: width 0.5s linear; }
+    </style>
+</head>
+<body>
+
+    <div id="screen-home" class="screen active">
+        <p style="letter-spacing: 5px; opacity: 0.6;">BLEFE. PODER. TRAIÇÃO.</p>
+        <h1 class="logo-main">GOLPE</h1>
+        <button class="btn-yellow" onclick="nav('screen-login')">JOGAR AGORA →</button>
+    </div>
+
+    <div id="screen-login" class="screen">
+        <div class="card-auth">
+            <h1 style="color:var(--yellow); margin:0;">GOLPE</h1>
+            <p style="font-size:0.7em; margin-bottom:20px; opacity:0.6;">VERSÃO BRASILEIRA</p>
+            <input id="input-nome" placeholder="Seu apelido">
+            <button class="btn-yellow" style="width:100%" onclick="criarSala()">Criar Nova Sala</button>
+            <p style="margin:15px 0; font-size:0.8em; opacity:0.4;">ou</p>
+            <input id="input-sala-cod" placeholder="Código da Sala">
+            <button class="btn-yellow" style="width:100%; background:#252533; color:white;" onclick="entrarSala()">Entrar na Sala</button>
+        </div>
+    </div>
+
+    <div id="screen-lobby" class="screen">
+        <div class="card-auth">
+            <p>SALA: <span id="display-cod" style="color:var(--gold); font-weight:bold; letter-spacing:5px;">----</span></p>
+            <div id="lista-jogadores" style="text-align:left; margin:20px 0; background:rgba(0,0,0,0.2); padding:15px; border-radius:10px;"></div>
+            <button class="btn-yellow" id="btn-iniciar" disabled onclick="iniciarPartida()">AGUARDANDO...</button>
+        </div>
+    </div>
+
+    <div id="screen-mesa" class="screen" style="padding:0">
+        <div id="ui-mesa-completa">
+            <div id="chat-log" class="log-container">
+                <div style="font-weight:bold; color:var(--gold); margin-bottom:10px;">HISTÓRICO</div>
+            </div>
+            
+            <div id="adversarios" class="adversarios-topo"></div>
+
+            <div class="mesa-central">
+                <div id="mesa-diamante"><div id="mesa-texto">GOLPE</div></div>
+                <div id="status-fase" style="margin-top:25px; font-weight:bold; letter-spacing:2px; color:var(--gold);">AGUARDANDO</div>
+            </div>
+
+            <div class="menu-acoes">
+                <div id="timer-bar"><div id="timer-fill"></div></div>
+                <div id="label-tempo" style="font-size:0.7em; text-align:right; margin-bottom:10px;">00:00</div>
+                <div id="area-botoes" style="display:flex; flex-direction:column; gap:10px;"></div>
+            </div>
+
+            <div class="meu-status">
+                <div style="font-size:2.5em; color:var(--gold); font-weight:bold;" id="minhas-moedas">💰 0</div>
+                <div id="minhas-cartas" style="display:flex; gap:15px;"></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // --- FIREBASE CONFIG ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyCj6Q8eWBiiBXOx_7vOICzGHjBSDYFNV2Q",
+        databaseURL: "https://golpe-63ee3-default-rtdb.firebaseio.com",
+        projectId: "golpe-63ee3",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let minhaInfo = { nome: "", id: "", sala: "", isHost: false };
+    let alvoId = null;
+
+    function nav(id) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    // --- SALAS ---
+    function criarSala() {
+        const n = document.getElementById('input-nome').value;
+        if(!n) return alert("Digite um nome!");
+        const cod = Math.random().toString(36).substring(2, 6).toUpperCase();
+        minhaInfo = { nome: n, id: "p_"+Date.now(), sala: cod, isHost: true };
+        db.ref(`salas/${cod}`).set({ iniciado: false, host: minhaInfo.id, fase: "ESPERA", log: [] });
+        conectar();
+    }
+
+    function entrarSala() {
+        const n = document.getElementById('input-nome').value;
+        const cod = document.getElementById('input-sala-cod').value.toUpperCase();
+        if(!n || !cod) return alert("Preencha tudo!");
+        minhaInfo = { nome: n, id: "p_"+Date.now(), sala: cod, isHost: false };
+        conectar();
+    }
+
+    function conectar() {
+        db.ref(`salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}`).set({
+            nome: minhaInfo.nome, moedas: 2, vivo: true, host: minhaInfo.isHost
+        });
+        document.getElementById('display-cod').innerText = minhaInfo.sala;
+        nav('screen-lobby');
+        ouvirSala();
+    }
+
+    function ouvirSala() {
+        db.ref(`salas/${minhaInfo.sala}`).on('value', snap => {
+            const d = snap.val();
+            if(!d) return;
+            if(d.iniciado && document.getElementById('screen-lobby').classList.contains('active')) nav('screen-mesa');
+            renderLobby(d);
+            if(d.iniciado) renderMesa(d);
+        });
+    }
+
+    function renderLobby(d) {
+        const jogs = d.jogadores || {};
+        const lista = document.getElementById('lista-jogadores');
+        lista.innerHTML = "";
+        Object.values(jogs).forEach(j => {
+            lista.innerHTML += `<div style="padding:5px 0;">• ${j.nome} ${j.host ? '<span style="color:var(--gold); font-size:0.8em;">[HOST]</span>' : ''}</div>`;
+        });
+        const btn = document.getElementById('btn-iniciar');
+        if(minhaInfo.isHost) {
+            btn.disabled = Object.keys(jogs).length < 2;
+            btn.innerText = btn.disabled ? "AGUARDANDO PLAYERS..." : "INICIAR JOGO";
+        } else {
+            btn.innerText = "AGUARDANDO HOST...";
+        }
+    }
+
+    // --- TEMPO E RESOLUÇÃO AUTOMÁTICA ---
+    setInterval(() => {
+        if (!minhaInfo.sala) return;
+        db.ref(`salas/${minhaInfo.sala}`).once("value", snap => {
+            const d = snap.val();
+            if (!d || !d.iniciado || !d.timerFinal) return;
+
+            const agora = Date.now();
+            const restante = d.timerFinal - agora;
+            const total = (d.fase === "ACAO" ? 30000 : 10000);
+            
+            document.getElementById("timer-fill").style.width = Math.max(0, (restante / total) * 100) + "%";
+            document.getElementById("label-tempo").innerText = `00:${Math.max(0, Math.floor(restante/1000)).toString().padStart(2, '0')}`;
+
+            if (restante <= 0) {
+                if (d.fase !== "ACAO") {
+                    if(d.vezDe === minhaInfo.id) executarEfeito(); // Autopass
+                } else if (d.vezDe === minhaInfo.id) {
+                    passarTurno(); // Autolose turn
+                }
+            }
+        });
+    }, 500);
+
+    // --- JOGO ---
+    function iniciarPartida() {
+        let b = []; ["Político","Bicheiro","X9","Juiz","Miliciano","Segurança"].forEach(p => { for(let i=0; i<3; i++) b.push(p); });
+        b.sort(() => Math.random() - 0.5);
+        db.ref(`salas/${minhaInfo.sala}/jogadores`).once("value", s => {
+            const js = s.val();
+            const ids = Object.keys(js);
+            let up = { iniciado: true, vezDe: ids[0], fase: "ACAO", timerFinal: Date.now() + 30000, baralho: b };
+            ids.forEach(id => {
+                up[`jogadores/${id}/cartas`] = [b.pop(), b.pop()];
+                up[`jogadores/${id}/moedas`] = 2;
+            });
+            db.ref(`salas/${minhaInfo.sala}`).update(up);
+        });
+    }
+
+    function renderMesa(d) {
+        const jogs = d.jogadores || {};
+        
+        // Verificação de Vitória
+        const ativos = Object.keys(jogs).filter(id => (jogs[id].cartas || []).length > 0);
+        if(ativos.length === 1) {
+            document.getElementById('area-botoes').innerHTML = `<div style="background:var(--gold); color:black; padding:20px; border-radius:10px; text-align:center; font-weight:bold;">🏆 ${jogs[ativos[0]].nome.toUpperCase()} VENCEU!</div>`;
+            return;
+        }
+
+        // Render Adversários
+        let advH = "";
+        for(let id in jogs) {
+            if(id === minhaInfo.id) continue;
+            const vivo = (jogs[id].cartas || []).length > 0;
+            let st = (id === d.vezDe ? "active-turn" : (id === alvoId ? "target-selected" : ""));
+            advH += `<div class="player-card ${st}" style="opacity:${vivo?1:0.3}" onclick="${vivo ? `alvoId='${id}'` : ''}">
+                <small>${jogs[id].nome}</small><br>${vivo ? '💰'+jogs[id].moedas : 'ELIMINADO'}
+            </div>`;
+        }
+        document.getElementById('adversarios').innerHTML = advH;
+
+        // Log
+        const logCont = document.getElementById('chat-log');
+        const hist = d.log || [];
+        logCont.innerHTML = `<div style="font-weight:bold; color:var(--gold); margin-bottom:10px;">HISTÓRICO</div>`;
+        hist.slice(-8).forEach(msg => {
+            logCont.innerHTML += `<div class="action-msg"><span>${msg}</span></div>`;
+        });
+
+        // Meu Status
+        const eu = jogs[minhaInfo.id];
+        document.getElementById('minhas-moedas').innerText = `💰 ${eu.moedas}`;
+        document.getElementById('minhas-cartas').innerHTML = (eu.cartas || []).map(c => `<div class="minha-carta">${c}</div>`).join("");
+        document.getElementById('status-fase').innerText = d.fase;
+
+        // Botões
+        const area = document.getElementById('area-botoes');
+        area.innerHTML = "";
+        if((eu.cartas || []).length === 0) return area.innerHTML = "<p>Você está fora do jogo.</p>";
+
+        if(d.fase === "ACAO" && d.vezDe === minhaInfo.id) {
+            area.innerHTML += `<button class="btn-yellow" onclick="pedirAcao('Político')">Político (+3 💰)</button>`;
+            area.innerHTML += `<button class="btn-yellow" onclick="pedirAcao('Propina')">Propina (Rouba 3)</button>`;
+            area.innerHTML += `<button class="btn-yellow" onclick="pedirAcao('X9')">Investigar (X9)</button>`;
+            area.innerHTML += `<button class="btn-yellow" onclick="pedirAcao('Trabalhar')" style="background:#444; color:white;">Trabalhar (+1 💰)</button>`;
+            if(eu.moedas >= 7) area.innerHTML += `<button class="btn-yellow" onclick="pedirAcao('Golpe')" style="background:#b71c1c; color:white;">DAR GOLPE (-7 💰)</button>`;
+        } else if(d.fase === "DUVIDA" && d.acaoPendente.autorId !== minhaInfo.id) {
+            area.innerHTML += `<button class="btn-yellow" onclick="reagir('DUVIDO')">DUVIDAR!</button>`;
+            area.innerHTML += `<button class="btn-yellow" onclick="reagir('PASSAR')" style="background:#444; color:white;">ACEITAR</button>`;
+        } else if(d.fase === "BLOQUEIO" && d.acaoPendente.alvoId === minhaInfo.id) {
+            area.innerHTML += `<button class="btn-yellow" onclick="reagir('BLOQUEIO')">BLOQUEAR</button>`;
+            area.innerHTML += `<button class="btn-yellow" onclick="reagir('PASSAR')" style="background:#444; color:white;">ACEITAR</button>`;
+        } else if(d.fase === "REVELAR_ESCOLHA" && d.acaoPendente.alvoId === minhaInfo.id) {
+            eu.cartas.forEach((c, i) => {
+                area.innerHTML += `<button class="btn-yellow" onclick="mostrarCartaAoX9(${i})">Mostrar ${c}</button>`;
+            });
+        }
+    }
+
+    function pedirAcao(tipo) {
+        if(["Propina","X9","Golpe"].includes(tipo) && !alvoId) return alert("Selecione um alvo!");
+        if(tipo === "Propina") {
+             db.ref(`salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/moedas`).once('value', s => {
+                 if(s.val() < 4) return alert("Propina exige 4 moedas de entrada!");
+                 processarAcao(tipo);
+             });
+        } else processarAcao(tipo);
+    }
+
+    function processarAcao(tipo) {
+        let f = (tipo === "Trabalhar" || tipo === "Golpe") ? "EXECUCAO" : "DUVIDA";
+        db.ref(`salas/${minhaInfo.sala}`).update({
+            acaoPendente: { autorId: minhaInfo.id, tipo, alvoId: alvoId || null },
+            fase: f, timerFinal: Date.now() + (f === "DUVIDA" ? 10000 : 30000)
+        });
+        db.ref(`salas/${minhaInfo.sala}/log`).once('value', s => {
+            let l = s.val() || []; l.push(`@${minhaInfo.nome} usou ${tipo}`);
+            db.ref(`salas/${minhaInfo.sala}/log`).set(l);
+        });
+        if(f === "EXECUCAO") executarEfeito();
+    }
+
+    function reagir(r) {
+        db.ref(`salas/${minhaInfo.sala}`).once('value', s => {
+            const d = s.val(); const a = d.acaoPendente;
+            if(r === "DUVIDO") {
+                let tem = d.jogadores[a.autorId].cartas.includes(a.tipo);
+                tem ? perderCarta(minhaInfo.id, executarEfeito) : perderCarta(a.autorId, passarTurno);
+            } else if(r === "BLOQUEIO") {
+                db.ref(`salas/${minhaInfo.sala}`).update({ fase: "DUVIDA_BLOQUEIO", timerFinal: Date.now() + 10000 });
+            } else {
+                if(d.fase === "DUVIDA" && ["Propina","X9"].includes(a.tipo)) {
+                    db.ref(`salas/${minhaInfo.sala}`).update({ fase: "BLOQUEIO", timerFinal: Date.now() + 10000 });
+                } else {
+                    if(a.tipo === "X9") db.ref(`salas/${minhaInfo.sala}`).update({ fase: "REVELAR_ESCOLHA", timerFinal: Date.now() + 10000 });
+                    else executarEfeito();
+                }
+            }
+        });
+    }
+
+    function executarEfeito() {
+        db.ref(`salas/${minhaInfo.sala}`).once('value', s => {
+            const d = s.val(); const a = d.acaoPendente; if(!a) return;
+            let up = {}; const aut = d.jogadores[a.autorId];
+            if(a.tipo === "Político") up[`jogadores/${a.autorId}/moedas`] = aut.moedas + 3;
+            if(a.tipo === "Trabalhar") up[`jogadores/${a.autorId}/moedas`] = aut.moedas + 1;
+            if(a.tipo === "Propina") {
+                up[`jogadores/${a.autorId}/moedas`] = aut.moedas - 4 + 3;
+                up[`jogadores/${a.alvoId}/moedas`] = Math.max(0, d.jogadores[a.alvoId].moedas - 3);
+            }
+            if(a.tipo === "Golpe") {
+                up[`jogadores/${a.autorId}/moedas`] = aut.moedas - 7;
+                let cAlvo = d.jogadores[a.alvoId].cartas || [];
+                if(cAlvo.length > 0) up[`jogadores/${a.alvoId}/cartas`] = cAlvo.slice(1);
+            }
+            up.fase = "ACAO"; up.acaoPendente = null;
+            db.ref(`salas/${minhaInfo.sala}`).update(up).then(passarTurno);
+        });
+    }
+
+    function mostrarCartaAoX9(idx) {
+        db.ref(`salas/${minhaInfo.sala}`).once('value', s => {
+            const d = s.val(); const carta = d.jogadores[minhaInfo.id].cartas[idx];
+            alert(`Você mostrou ${carta} ao X9.`);
+            db.ref(`salas/${minhaInfo.sala}`).update({ fase: "ACAO", acaoPendente: null }).then(passarTurno);
+        });
+    }
+
+    function passarTurno() {
+        db.ref(`salas/${minhaInfo.sala}`).once('value', s => {
+            const d = s.val(); const ids = Object.keys(d.jogadores).filter(id => (d.jogadores[id].cartas || []).length > 0);
+            const atualIdx = ids.indexOf(d.vezDe);
+            const prox = ids[(atualIdx + 1) % ids.length];
+            db.ref(`salas/${minhaInfo.sala}`).update({ vezDe: prox, fase: "ACAO", timerFinal: Date.now() + 30000, acaoPendente: null });
+            alvoId = null;
+        });
+    }
+
+    function perderCarta(id, cb) {
+        db.ref(`salas/${minhaInfo.sala}/jogadores/${id}/cartas`).once('value', s => {
+            let c = s.val() || []; c.shift();
+            db.ref(`salas/${minhaInfo.sala}/jogadores/${id}/cartas`).set(c).then(cb);
+        });
+    }
+</script>
+</body>
+</html>
