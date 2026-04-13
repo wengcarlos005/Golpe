@@ -22,6 +22,7 @@ export interface Sala {
   log?: string[];
   acaoPendente?: AcaoPendente | null;
   jogadores?: Record<string, Jogador>;
+  quemPerde?: string | null;
 }
 
 export interface MinhaInfo {
@@ -43,26 +44,26 @@ export const PERSONAGENS = [
 export const PERSONAGEM_INFO: Record<string, { emoji: string; desc: string }> = {
   Político: {
     emoji: "🏛️",
-    desc: "Ganha 3 moedas. Bloqueia Ajuda Externa.",
+    desc: "Ganha 3 moedas por turno. Pode bloquear Ajuda Externa.",
   },
   Bicheiro: {
     emoji: "🎰",
-    desc: "Rouba 2 moedas de um alvo. Miliciano bloqueia.",
+    desc: "Rouba 2 moedas de um jogador. Miliciano bloqueia.",
   },
   Bandido: {
     emoji: "🔪",
-    desc: "Assassina (alvo perde carta). Custa 3 moedas. Miliciano bloqueia.",
+    desc: "Custa 3 moedas. Elimina uma carta do alvo. Miliciano bloqueia.",
   },
   X9: {
     emoji: "🕵️",
-    desc: "Investiga uma carta do alvo.",
+    desc: "Olha uma carta do alvo. Juiz bloqueia.",
   },
   Juiz: {
     emoji: "⚖️",
-    desc: "Bloqueia investigação do X9.",
+    desc: "Bloqueia investigações do X9.",
   },
   Miliciano: {
     emoji: "🛡️",
-    desc: "Bloqueia Bandido e Bicheiro.",
+    desc: "Bloqueia roubos (Bicheiro) e assassinatos (Bandido).",
   },
 };

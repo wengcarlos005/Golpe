@@ -102,31 +102,53 @@ html, body, #root {
 }
 
 /* ===== CHARACTER GRID ===== */
-.char-grid {
+.desc-box {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 14px 20px;
+  min-height: 54px;
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.8);
+  transition: all 0.2s;
+}
+
+.char-row {
   display: flex;
+  flex-direction: row;
   gap: 10px;
-  margin-top: 28px;
   flex-wrap: wrap;
   justify-content: center;
-  max-width: 520px;
+  max-width: 540px;
+  width: 100%;
+  margin: 12px 0;
 }
 
-.char-item {
+.char-card-small {
   background: rgba(28, 28, 38, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 8px;
   cursor: pointer;
-  width: 82px;
+  min-width: 78px;
   text-align: center;
   transition: all 0.2s;
-  position: relative;
 }
 
-.char-item:hover {
+.char-card-small:hover {
   border-color: rgba(255, 204, 0, 0.5);
   transform: translateY(-2px);
   background: rgba(40, 40, 55, 0.9);
+}
+
+.char-card-small.char-selected {
+  border-color: var(--gold);
+  background: rgba(255, 215, 0, 0.08);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
 }
 
 .char-emoji {
@@ -135,46 +157,10 @@ html, body, #root {
 }
 
 .char-nome {
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: rgba(255, 255, 255, 0.85);
-}
-
-.char-tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: #1c1c2e;
-  border: 1px solid rgba(255, 204, 0, 0.3);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 0.7rem;
-  padding: 8px 12px;
-  border-radius: 8px;
-  width: 180px;
-  text-align: left;
-  line-height: 1.4;
-  z-index: 10;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  pointer-events: none;
-}
-
-.char-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: rgba(255, 204, 0, 0.3);
-}
-
-.char-hint {
-  margin-top: 10px;
-  font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
-  letter-spacing: 1px;
 }
 
 .home-particles {
@@ -846,6 +832,77 @@ html, body, #root {
   color: var(--text-dim);
   font-style: italic;
   text-align: center;
+}
+
+/* ===== PERDER CARTA ===== */
+.player-card.perdendo {
+  border-color: #ff5252 !important;
+  box-shadow: 0 0 14px rgba(255, 82, 82, 0.5) !important;
+  animation: perdendoPulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes perdendoPulse {
+  from { box-shadow: 0 0 8px rgba(255, 82, 82, 0.3); }
+  to { box-shadow: 0 0 20px rgba(255, 82, 82, 0.7); }
+}
+
+.perdendo-indicator {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #c62828;
+  color: #fff;
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.perdendo-aviso {
+  border-color: rgba(255, 82, 82, 0.4) !important;
+  background: rgba(255, 82, 82, 0.06) !important;
+  color: #ff8a80 !important;
+}
+
+.minha-carta.carta-perder {
+  cursor: pointer;
+  border: 3px solid #ff5252;
+  animation: cartaPerdePulse 0.7s ease-in-out infinite alternate;
+  position: relative;
+}
+
+.minha-carta.carta-perder:hover {
+  transform: translateY(-10px) rotate(-2deg);
+  box-shadow: 0 0 20px rgba(255, 82, 82, 0.7);
+}
+
+@keyframes cartaPerdePulse {
+  from { border-color: #ff5252; box-shadow: 0 0 6px rgba(255, 82, 82, 0.3); }
+  to { border-color: #ff1744; box-shadow: 0 0 18px rgba(255, 82, 82, 0.6); }
+}
+
+.carta-perder-label {
+  font-size: 0.45rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #ff5252;
+  margin-top: 4px;
+  text-align: center;
+}
+
+.perder-instrucao {
+  color: #ff8a80;
+  font-size: 0.85rem;
+  font-weight: 700;
+  animation: flash 1s ease-in-out infinite alternate;
+}
+
+@keyframes flash {
+  from { opacity: 0.7; }
+  to { opacity: 1; }
 }
 
 .vencedor-banner {
