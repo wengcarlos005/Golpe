@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Golpe Online</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+<style>
+body {
+  font-family: Arial;
+  background:#111;
+  color:#fff;
+  text-align:center;
+}
+button {
+  margin:5px;
+  padding:10px;
+}
+.player {
+  border:1px solid #fff;
+  margin:5px;
+  padding:10px;
+  display:inline-block;
+}
+.acao-box {
+  border:2px solid red;
+  padding:10px;
+  margin-top:20px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🎴 Golpe Online</h1>
+
+<div id="login">
+  Sala: <input id="sala"><br>
+  Nome: <input id="nome"><br>
+  <button onclick="entrar()">Entrar</button>
+</div>
+
+<div id="game"></div>
+
+<script>
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCj6Q8eWBiiBXOx_7vOICzGHjBSDYFNV2Q",
+  authDomain: "golpe-63ee3.firebaseapp.com",
+  databaseURL: "https://golpe-63ee3-default-rtdb.firebaseio.com",
+  projectId: "golpe-63ee3",
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let salaID;
+let jogadorID;
+
+// ENTRAR
+function entrar(){
+  salaID = document.getElementById("sala").value;
+  let nome = document.getElementById("nome").value;
+
+  if(!salaID || !nome) return alert("Preencha tudo");
+
+  jogadorID = Date.now().toString();
+
+  document.getElementById("login").style.display="none";
+
+  db.ref(`salas/${salaID}/jogadores/${jogadorID}`).set({
+    nome,
+    moedas:3,
+    cartas:["Assassino","Miliciano"]
+  });
+
+  ouvir();
+}
+
+// OUVIR
+function ouvir(){
+
+  db.ref(`salas/${salaID}`).on("value", snap=>{
+    let dados = snap.val();
+    render(dados);
+  });
+
+  // TIMER GLOBAL
+  setInterval(()=>{
+    db.ref(`salas/${salaID}`).get().then(snap=>{
+      let dados = snap.val();
+      let acao = dados?.acaoAtual;
+
+      if(!acao) return;
+
+      if(Date.now() > acao.tempoFim){
+
+        if(!acao.bloqueado && !acao.duvidado){
+          executarAcao(acao);
+        }
+
+        db.ref(`salas/${salaID}/acaoAtual`).remove();
+      }
+    });
+  },1000);
+}
+
+// RENDER
+function render(dados){
+
+  if(!dados){
+    document.getElementById("game").innerHTML = "Aguardando...";
+    return;
+  }
+
+  let html = "<h2>Jogadores</h2>";
+
+  let jogadores = dados.jogadores || {};
+
+  for(let id in jogadores){
+    let j = jogadores[id];
+
+    html += `
+    <div class="player">
+      <b>${j.nome}</b><br>
+      💰 ${j.moedas}<br>
+      <button onclick="atacar('${id}')">Atacar</button>
+    </div>`;
+  }
+
+  // AÇÃO ATUAL
+  let acao = dados.acaoAtual;
+
+  if(acao){
+
+    let tempo = Math.max(0, Math.floor((acao.tempoFim - Date.now())/1000));
+
+    html += `
+    <div class="acao-box">
+      <h3>⚔️ Ação em andamento</h3>
+      <p>${acao.tipo} → ${acao.para}</p>
+      <p>⏳ ${tempo}s</p>
+    `;
+
+    // SE EU SOU ALVO
+    if(acao.para === jogadorID){
+
+      html += `
+        <button onclick="duvidar()">❗ Duvidar</button>
+        <button onclick="bloquear()">🛡️ Bloquear</button>
+      `;
+    }
+
+    html += `</div>`;
+  }
+
+  document.getElementById("game").innerHTML = html;
+}
+
+// CRIAR AÇÃO
+function atacar(alvoID){
+
+  db.ref(`salas/${salaID}`).update({
+    acaoAtual:{
+      tipo:"assassinato",
+      de:jogadorID,
+      para:alvoID,
+      bloqueado:false,
+      duvidado:false,
+      tempoFim:Date.now()+10000
+    }
+  });
+}
+
+// DUVIDAR
+function duvidar(){
+  db.ref(`salas/${salaID}/acaoAtual`).update({
+    duvidado:true
+  });
+
+  alert("Você duvidou!");
+}
+
+// BLOQUEAR
+function bloquear(){
+  db.ref(`salas/${salaID}/acaoAtual`).update({
+    bloqueado:true
+  });
+
+  alert("Você bloqueou!");
+}
+
+// EXECUTAR AÇÃO
+function executarAcao(acao){
+
+  if(acao.tipo === "assassinato"){
+
+    let alvoRef = db.ref(`salas/${salaID}/jogadores/${acao.para}`);
+
+    alvoRef.get().then(snap=>{
+      let alvo = snap.val();
+
+      if(!alvo) return;
+
+      alvo.cartas.pop();
+
+      alvoRef.set(alvo);
+    });
+  }
+}
+
+</script>
+
+</body>
+</html>
