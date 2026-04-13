@@ -25,6 +25,7 @@ export interface Sala {
   quemPerde?: string | null;
   bloqueadorId?: string | null;
   bloqueadorPersonagem?: string | null;
+  votos?: Record<string, string> | null;
 }
 
 export interface MinhaInfo {

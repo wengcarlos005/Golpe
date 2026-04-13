@@ -668,6 +668,17 @@ html, body, #root {
   font-weight: 700;
 }
 
+.votos-counter {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 8px;
+  letter-spacing: 0.5px;
+}
+
 .acao-pendente-info {
   font-size: 0.8rem;
   color: rgba(255,255,255,0.7);

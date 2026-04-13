@@ -7,10 +7,8 @@ interface MesaProps {
   minhaInfo: MinhaInfo;
 }
 
-// Which actions require a target
 const ACOES_COM_ALVO = ["Bicheiro", "Bandido", "Investigar", "Trocar", "Golpe"];
 
-// Which character is needed to BLOCK each action
 const BLOQUEADOR_CHAR: Record<string, string> = {
   "Ajuda Externa": "Político",
   "Bicheiro": "Miliciano",
@@ -20,16 +18,15 @@ const BLOQUEADOR_CHAR: Record<string, string> = {
   "Disfarce": "Juiz",
 };
 
-// Which actions can be DOUBTED (require a character claim)
+// Which actions require a character claim and can be doubted
 const ACOES_COM_DUVIDA = [
   "Político", "Bicheiro", "Bandido", "Investigar", "Trocar", "Disfarce",
 ];
 
-// Which actions skip doubt and go to bloqueio / straight to execucao
 function getFaseInicial(tipo: string): string {
   if (tipo === "Trabalhar" || tipo === "Golpe") return "EXECUCAO";
-  if (tipo === "Ajuda Externa") return "BLOQUEIO"; // anyone can get foreign aid; no doubt
-  return "DUVIDA"; // others can be doubted first
+  if (tipo === "Ajuda Externa") return "BLOQUEIO"; // anyone can get foreign aid
+  return "DUVIDA";
 }
 
 export default function Mesa({ minhaInfo }: MesaProps) {
@@ -39,6 +36,8 @@ export default function Mesa({ minhaInfo }: MesaProps) {
   const [tempoRestante, setTempoRestante] = useState(30);
   const executandoRef = useRef(false);
 
+  // ─── Core helpers ───────────────────────────────────────────────
+
   const passarTurno = useCallback(async () => {
     const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
     const d = snap.val() as Sala;
@@ -46,8 +45,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     const ids = Object.keys(d.jogadores || {}).filter(
       (id) => (d.jogadores![id].cartas || []).length > 0
     );
-    const atualIdx = ids.indexOf(d.vezDe!);
-    const prox = ids[(atualIdx + 1) % ids.length];
+    const prox = ids[(ids.indexOf(d.vezDe!) + 1) % ids.length];
     await update(ref(db, `salas/${minhaInfo.sala}`), {
       vezDe: prox,
       fase: "ACAO",
@@ -56,21 +54,20 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       quemPerde: null,
       bloqueadorId: null,
       bloqueadorPersonagem: null,
+      votos: null,
     });
     setAlvoId(null);
     executandoRef.current = false;
   }, [minhaInfo.sala]);
 
-  const entrarFasePerda = useCallback(
-    async (id: string) => {
-      await update(ref(db, `salas/${minhaInfo.sala}`), {
-        fase: "PERDER_CARTA",
-        quemPerde: id,
-        timerFinal: Date.now() + 15000,
-      });
-    },
-    [minhaInfo.sala]
-  );
+  const entrarFasePerda = useCallback(async (id: string) => {
+    await update(ref(db, `salas/${minhaInfo.sala}`), {
+      fase: "PERDER_CARTA",
+      quemPerde: id,
+      votos: null,
+      timerFinal: Date.now() + 15000,
+    });
+  }, [minhaInfo.sala]);
 
   const executarEfeito = useCallback(async () => {
     if (executandoRef.current) return;
@@ -86,26 +83,18 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     const baralho = [...(d.baralho || [])];
     const upd: Record<string, unknown> = {};
 
-    if (a.tipo === "Político") {
-      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 3;
-    }
-    if (a.tipo === "Ajuda Externa") {
-      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 2;
-    }
-    if (a.tipo === "Trabalhar") {
-      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 1;
-    }
+    if (a.tipo === "Político") upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 3;
+    if (a.tipo === "Ajuda Externa") upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 2;
+    if (a.tipo === "Trabalhar") upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 1;
     if (a.tipo === "Bicheiro") {
       upd[`jogadores/${a.autorId}/moedas`] = aut.moedas + 2;
-      upd[`jogadores/${a.alvoId!}/moedas`] = Math.max(
-        0,
-        d.jogadores![a.alvoId!].moedas - 2
-      );
+      upd[`jogadores/${a.alvoId!}/moedas`] = Math.max(0, d.jogadores![a.alvoId!].moedas - 2);
     }
 
     if (a.tipo === "Bandido") {
       upd[`jogadores/${a.autorId}/moedas`] = Math.max(0, aut.moedas - 3);
       upd.acaoPendente = null;
+      upd.votos = null;
       await update(ref(db, `salas/${minhaInfo.sala}`), upd);
       await entrarFasePerda(a.alvoId!);
       executandoRef.current = false;
@@ -115,24 +104,25 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     if (a.tipo === "Golpe") {
       upd[`jogadores/${a.autorId}/moedas`] = Math.max(0, aut.moedas - 7);
       upd.acaoPendente = null;
+      upd.votos = null;
       await update(ref(db, `salas/${minhaInfo.sala}`), upd);
       await entrarFasePerda(a.alvoId!);
       executandoRef.current = false;
       return;
     }
 
-    // Investigar → target reveals a card
     if (a.tipo === "Investigar") {
-      await update(ref(db, `salas/${minhaInfo.sala}`), {
-        fase: "REVELAR_CARTA",
-        timerFinal: Date.now() + 15000,
-      });
+      upd.fase = "REVELAR_CARTA";
+      upd.votos = null;
+      upd.timerFinal = Date.now() + 15000;
+      await update(ref(db, `salas/${minhaInfo.sala}`), upd);
       executandoRef.current = false;
       return;
     }
 
-    // Trocar → swap one of target's cards with deck
     if (a.tipo === "Trocar") {
+      // Costs 1 coin; swap one of target's cards with deck
+      upd[`jogadores/${a.autorId}/moedas`] = Math.max(0, aut.moedas - 1);
       const alvoCa = [...(d.jogadores![a.alvoId!].cartas || [])];
       if (alvoCa.length > 0) {
         baralho.push(alvoCa.pop()!);
@@ -143,7 +133,6 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       upd.baralho = baralho;
     }
 
-    // Disfarce → swap one of own cards with deck
     if (a.tipo === "Disfarce") {
       const autCa = [...(aut.cartas || [])];
       if (autCa.length > 0) {
@@ -160,15 +149,111 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     upd.quemPerde = null;
     upd.bloqueadorId = null;
     upd.bloqueadorPersonagem = null;
+    upd.votos = null;
     await update(ref(db, `salas/${minhaInfo.sala}`), upd);
     await passarTurno();
   }, [minhaInfo.sala, passarTurno, entrarFasePerda]);
 
+  // ─── Voting system ──────────────────────────────────────────────
+
+  async function votar(tipo: "DUVIDAR" | "PASSAR" | "BLOQUEIO", char?: string) {
+    const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
+    const d = snap.val() as Sala;
+    const a = d.acaoPendente as AcaoPendente;
+
+    if (tipo === "DUVIDAR") {
+      // Immediate doubt resolution — no waiting for consensus
+      const cartaNecessaria = ["Investigar", "Trocar", "Disfarce"].includes(a.tipo)
+        ? "Investigador"
+        : a.tipo;
+      const temCarta = (d.jogadores![a.autorId].cartas || []).includes(cartaNecessaria);
+      if (temCarta) {
+        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou mas ${d.jogadores![a.autorId]?.nome} tinha ${cartaNecessaria}!`);
+        await entrarFasePerda(minhaInfo.id);
+      } else {
+        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou! ${d.jogadores![a.autorId]?.nome} estava blefando!`);
+        await entrarFasePerda(a.autorId);
+      }
+      return;
+    }
+
+    if (tipo === "BLOQUEIO" && char) {
+      // Target declares block with specific character
+      await adicionarLog(`🛡️ ${minhaInfo.nome} bloqueou com ${char}`);
+      await update(ref(db, `salas/${minhaInfo.sala}`), {
+        fase: "DUVIDA_BLOQUEIO",
+        bloqueadorId: minhaInfo.id,
+        bloqueadorPersonagem: char,
+        votos: null,
+        timerFinal: Date.now() + 10000,
+      });
+      return;
+    }
+
+    // PASSAR — register vote and check consensus
+    await update(ref(db, `salas/${minhaInfo.sala}/votos/${minhaInfo.id}`), "PASSAR");
+
+    // Re-read to check consensus with fresh data
+    const snap2 = await get(ref(db, `salas/${minhaInfo.sala}`));
+    const d2 = snap2.val() as Sala;
+    const vivos = Object.keys(d2.jogadores || {}).filter(
+      (id) => (d2.jogadores![id].cartas || []).length > 0
+    );
+    const votosCount = Object.keys(d2.votos || {}).length;
+    const precisam = vivos.length - 1; // all except author
+
+    if (votosCount >= precisam) {
+      if (d2.fase === "DUVIDA") {
+        // All passed doubt → offer blocking
+        await update(ref(db, `salas/${minhaInfo.sala}`), {
+          fase: "BLOQUEIO",
+          votos: null,
+          timerFinal: Date.now() + 10000,
+        });
+      } else if (d2.fase === "BLOQUEIO") {
+        // All passed blocking → execute action
+        await executarEfeito();
+      }
+    }
+  }
+
+  async function contestarBloqueio(duvidar: boolean) {
+    const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
+    const d = snap.val() as Sala;
+
+    if (!duvidar) {
+      await adicionarLog(`✓ ${minhaInfo.nome} aceitou o bloqueio`);
+      await update(ref(db, `salas/${minhaInfo.sala}`), {
+        fase: "ACAO",
+        acaoPendente: null,
+        bloqueadorId: null,
+        bloqueadorPersonagem: null,
+        votos: null,
+      });
+      await passarTurno();
+      return;
+    }
+
+    const bloqueadorTemCarta = (
+      d.jogadores![d.bloqueadorId!]?.cartas || []
+    ).includes(d.bloqueadorPersonagem!);
+
+    if (bloqueadorTemCarta) {
+      await adicionarLog(`🛡️ Bloqueio válido! ${d.jogadores![d.bloqueadorId!]?.nome} tinha ${d.bloqueadorPersonagem}`);
+      await entrarFasePerda(minhaInfo.id);
+    } else {
+      await adicionarLog(`❌ Bloqueio falso! ${d.jogadores![d.bloqueadorId!]?.nome} estava blefando!`);
+      // Blocker loses their card; action then executes (handled after perda)
+      await entrarFasePerda(d.bloqueadorId!);
+    }
+  }
+
+  // ─── Other actions ──────────────────────────────────────────────
+
   useEffect(() => {
     const salaRef = ref(db, `salas/${minhaInfo.sala}`);
     const unsub = onValue(salaRef, (snap) => {
-      const data = snap.val() as Sala;
-      setSala(data);
+      setSala(snap.val() as Sala);
     });
     return () => unsub();
   }, [minhaInfo.sala]);
@@ -183,7 +268,6 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       const agora = Date.now();
       const restante = d.timerFinal - agora;
       const total = d.fase === "ACAO" ? 30000 : 15000;
-
       setTimerPercent(Math.max(0, (restante / total) * 100));
       setTempoRestante(Math.max(0, Math.floor(restante / 1000)));
 
@@ -192,18 +276,15 @@ export default function Mesa({ minhaInfo }: MesaProps) {
           await passarTurno();
         } else if (d.fase === "PERDER_CARTA" && d.quemPerde === minhaInfo.id) {
           await confirmarPerda(0);
-        } else if (
-          d.fase === "REVELAR_CARTA" &&
-          d.acaoPendente?.alvoId === minhaInfo.id
-        ) {
+        } else if (d.fase === "REVELAR_CARTA" && d.acaoPendente?.alvoId === minhaInfo.id) {
           const cartas = d.jogadores?.[minhaInfo.id]?.cartas || [];
           if (cartas.length > 0) await revelarParaInvestigador(cartas[0]);
         } else if (
-          d.fase !== "ACAO" &&
-          d.fase !== "PERDER_CARTA" &&
-          d.fase !== "REVELAR_CARTA" &&
+          (d.fase === "DUVIDA" || d.fase === "BLOQUEIO") &&
+          !executandoRef.current &&
           d.vezDe === minhaInfo.id
         ) {
+          // Timer expired on voting phase — force execute
           await executarEfeito();
         }
       }
@@ -219,34 +300,22 @@ export default function Mesa({ minhaInfo }: MesaProps) {
   }
 
   async function confirmarPerda(idx: number) {
-    const snap = await get(
-      ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/cartas`)
-    );
+    const snap = await get(ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/cartas`));
     const cartas = (snap.val() as string[]) || [];
     const cartaPerdida = cartas[idx];
     cartas.splice(idx, 1);
-    await set(
-      ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/cartas`),
-      cartas
-    );
+    await set(ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/cartas`), cartas);
     await adicionarLog(`⚠️ ${minhaInfo.nome} perdeu ${cartaPerdida}`);
-    await update(ref(db, `salas/${minhaInfo.sala}`), {
-      fase: "ACAO",
-      quemPerde: null,
-    });
+    await update(ref(db, `salas/${minhaInfo.sala}`), { fase: "ACAO", quemPerde: null });
     await passarTurno();
   }
 
   async function revelarParaInvestigador(carta: string) {
     const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
     const d = snap.val() as Sala;
-    const autorNome =
-      d.jogadores?.[d.acaoPendente?.autorId!]?.nome || "Investigador";
+    const autorNome = d.jogadores?.[d.acaoPendente?.autorId!]?.nome || "Investigador";
     await adicionarLog(`🕵️ ${autorNome} viu: ${carta} (de ${minhaInfo.nome})`);
-    await update(ref(db, `salas/${minhaInfo.sala}`), {
-      fase: "ACAO",
-      acaoPendente: null,
-    });
+    await update(ref(db, `salas/${minhaInfo.sala}`), { fase: "ACAO", acaoPendente: null });
     await passarTurno();
   }
 
@@ -255,115 +324,21 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       alert("Selecione um alvo clicando em um jogador!");
       return;
     }
-
-    const snap = await get(
-      ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/moedas`)
-    );
+    const snap = await get(ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/moedas`));
     const moedas = snap.val() as number;
-
-    if (tipo === "Bandido" && moedas < 3) {
-      alert("Bandido exige 3 moedas!");
-      return;
-    }
-    if (tipo === "Golpe" && moedas < 7) {
-      alert("Golpe exige 7 moedas!");
-      return;
-    }
+    if (tipo === "Bandido" && moedas < 3) { alert("Bandido exige 3 moedas!"); return; }
+    if (tipo === "Golpe" && moedas < 7) { alert("Golpe exige 7 moedas!"); return; }
+    if (tipo === "Trocar" && moedas < 1) { alert("Trocar exige 1 moeda!"); return; }
 
     const fase = getFaseInicial(tipo);
     await update(ref(db, `salas/${minhaInfo.sala}`), {
       acaoPendente: { autorId: minhaInfo.id, tipo, alvoId: alvoId || null },
       fase,
       timerFinal: Date.now() + 10000,
+      votos: {},
     });
     await adicionarLog(`▶ ${minhaInfo.nome} usou ${tipo}`);
     if (fase === "EXECUCAO") await executarEfeito();
-  }
-
-  async function reagir(r: string, char?: string) {
-    const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
-    const d = snap.val() as Sala;
-    const a = d.acaoPendente as AcaoPendente;
-
-    if (r === "DUVIDO") {
-      // Map Investigar/Trocar/Disfarce actions to the Investigador character
-      const cartaNecessaria = ["Investigar", "Trocar", "Disfarce"].includes(a.tipo)
-        ? "Investigador"
-        : a.tipo;
-      const temCarta = (d.jogadores![a.autorId].cartas || []).includes(cartaNecessaria);
-      if (temCarta) {
-        // Doubter wrong — doubter loses a card
-        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou mas ${jogadores[a.autorId]?.nome} tinha ${cartaNecessaria}!`);
-        await entrarFasePerda(minhaInfo.id);
-      } else {
-        // Bluff caught — author loses a card
-        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou! ${jogadores[a.autorId]?.nome} estava blefando!`);
-        await entrarFasePerda(a.autorId);
-      }
-    } else if (r === "BLOQUEIO" && char) {
-      // Blocker declares which character they're using
-      await adicionarLog(`🛡️ ${minhaInfo.nome} bloqueou com ${char}`);
-      await update(ref(db, `salas/${minhaInfo.sala}`), {
-        fase: "DUVIDA_BLOQUEIO",
-        bloqueadorId: minhaInfo.id,
-        bloqueadorPersonagem: char,
-        timerFinal: Date.now() + 10000,
-      });
-    } else {
-      // PASSAR — advance the phase
-      if (d.fase === "DUVIDA") {
-        // After doubt phase passes, offer blocking
-        await update(ref(db, `salas/${minhaInfo.sala}`), {
-          fase: "BLOQUEIO",
-          timerFinal: Date.now() + 10000,
-        });
-      } else if (d.fase === "BLOQUEIO") {
-        // Target accepted, execute action
-        await executarEfeito();
-      } else {
-        await executarEfeito();
-      }
-    }
-  }
-
-  async function contestarBloqueio(duvidar: boolean) {
-    const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
-    const d = snap.val() as Sala;
-
-    if (!duvidar) {
-      // Author accepts the block — turn passes
-      await adicionarLog(`✓ ${minhaInfo.nome} aceitou o bloqueio`);
-      await update(ref(db, `salas/${minhaInfo.sala}`), {
-        fase: "ACAO",
-        acaoPendente: null,
-        bloqueadorId: null,
-        bloqueadorPersonagem: null,
-      });
-      await passarTurno();
-      return;
-    }
-
-    // Author doubts the block
-    const bloqueadorTemCarta = (
-      d.jogadores![d.bloqueadorId!]?.cartas || []
-    ).includes(d.bloqueadorPersonagem!);
-
-    if (bloqueadorTemCarta) {
-      // Blocker was honest — author loses a card, block stands
-      await adicionarLog(
-        `🛡️ Bloqueio válido! ${d.jogadores![d.bloqueadorId!]?.nome} tinha ${d.bloqueadorPersonagem}`
-      );
-      await entrarFasePerda(minhaInfo.id);
-    } else {
-      // Blocker was bluffing — blocker loses a card, action executes
-      await adicionarLog(
-        `❌ Bloqueio falso! ${d.jogadores![d.bloqueadorId!]?.nome} estava blefando!`
-      );
-      await entrarFasePerda(d.bloqueadorId!);
-      // After the blocker loses their card, action should execute
-      // This is handled after confirmarPerda → passarTurno
-      // For simplicity, we execute immediately after setting the perda phase
-    }
   }
 
   async function reiniciarJogo() {
@@ -375,9 +350,12 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       quemPerde: null,
       bloqueadorId: null,
       bloqueadorPersonagem: null,
+      votos: null,
       log: [],
     });
   }
+
+  // ─── Render ─────────────────────────────────────────────────────
 
   if (!sala) {
     return (
@@ -391,45 +369,35 @@ export default function Mesa({ minhaInfo }: MesaProps) {
   const jogadores = sala.jogadores || {};
   const eu = jogadores[minhaInfo.id];
   const minhasCartas = eu?.cartas || [];
-  const ativos = Object.keys(jogadores).filter(
-    (id) => (jogadores[id].cartas || []).length > 0
-  );
+  const ativos = Object.keys(jogadores).filter((id) => (jogadores[id].cartas || []).length > 0);
   const vencedor = ativos.length === 1 ? jogadores[ativos[0]] : null;
   const minhasMoedas = eu?.moedas ?? 0;
-
-  const fasePerder =
-    sala.fase === "PERDER_CARTA" && sala.quemPerde === minhaInfo.id;
-  const faseRevelar =
-    sala.fase === "REVELAR_CARTA" &&
-    sala.acaoPendente?.alvoId === minhaInfo.id;
-  const faseDuvidaBloqueio =
-    sala.fase === "DUVIDA_BLOQUEIO" &&
-    sala.acaoPendente?.autorId === minhaInfo.id;
-
-  // Can this player block the current action?
   const acaoPend = sala.acaoPendente;
-  const possoBloquear =
-    sala.fase === "BLOQUEIO" &&
-    acaoPend?.alvoId === minhaInfo.id &&
-    !!BLOQUEADOR_CHAR[acaoPend?.tipo || ""];
 
-  // The character needed to block the current action
-  const charParaBloquear = acaoPend ? BLOQUEADOR_CHAR[acaoPend.tipo] : null;
+  const fasePerder = sala.fase === "PERDER_CARTA" && sala.quemPerde === minhaInfo.id;
+  const faseRevelar = sala.fase === "REVELAR_CARTA" && acaoPend?.alvoId === minhaInfo.id;
+  const faseDuvidaBloqueio = sala.fase === "DUVIDA_BLOQUEIO" && acaoPend?.autorId === minhaInfo.id;
+  const jaVotei = !!(sala.votos && sala.votos[minhaInfo.id]);
+  const ehAutor = acaoPend?.autorId === minhaInfo.id;
+  const podeDuvidar = !ehAutor && !jaVotei &&
+    sala.fase === "DUVIDA" && ACOES_COM_DUVIDA.includes(acaoPend?.tipo || "");
+  const possoBloquear = !ehAutor && !jaVotei &&
+    sala.fase === "BLOQUEIO" && acaoPend?.alvoId === minhaInfo.id &&
+    !!BLOQUEADOR_CHAR[acaoPend?.tipo || ""];
+  const podePasar = !ehAutor && !jaVotei &&
+    (sala.fase === "DUVIDA" || sala.fase === "BLOQUEIO");
+
+  const votosCount = Object.keys(sala.votos || {}).length;
+  const totalVotos = ativos.length - 1; // all except author
 
   return (
     <div className="mesa-wrapper">
       <div className="ui-mesa-completa">
         {/* LOG */}
         <div className="log-container">
-          {(sala.log || [])
-            .slice()
-            .reverse()
-            .slice(0, 20)
-            .map((msg, i) => (
-              <div key={i} className="action-msg">
-                {msg}
-              </div>
-            ))}
+          {(sala.log || []).slice().reverse().slice(0, 20).map((msg, i) => (
+            <div key={i} className="action-msg">{msg}</div>
+          ))}
           <div className="log-titulo">HISTÓRICO</div>
         </div>
 
@@ -441,48 +409,29 @@ export default function Mesa({ minhaInfo }: MesaProps) {
               const vivo = (j.cartas || []).length > 0;
               const isVez = id === sala.vezDe;
               const isAlvo = id === alvoId;
-              const isPerdendo =
-                sala.fase === "PERDER_CARTA" && sala.quemPerde === id;
-              const isRevelando =
-                sala.fase === "REVELAR_CARTA" &&
-                sala.acaoPendente?.alvoId === id;
+              const isPerdendo = sala.fase === "PERDER_CARTA" && sala.quemPerde === id;
+              const isRevelando = sala.fase === "REVELAR_CARTA" && acaoPend?.alvoId === id;
+              const votouPasar = !!(sala.votos && sala.votos[id]);
               return (
                 <div
                   key={id}
                   className={`player-card ${isVez ? "active-turn" : ""} ${isAlvo ? "target-selected" : ""} ${!vivo ? "eliminado" : ""} ${isPerdendo ? "perdendo" : ""}`}
                   onClick={() => vivo && setAlvoId(id === alvoId ? null : id)}
                 >
-                  <div className="player-avatar">
-                    {j.nome.charAt(0).toUpperCase()}
-                  </div>
+                  <div className="player-avatar">{j.nome.charAt(0).toUpperCase()}</div>
                   <div className="player-nome">{j.nome}</div>
                   <div className="player-status">
-                    {vivo ? (
-                      <span className="moedas-badge">💰 {j.moedas}</span>
-                    ) : (
-                      <span className="eliminado-badge">💀</span>
-                    )}
+                    {vivo ? <span className="moedas-badge">💰 {j.moedas}</span> : <span className="eliminado-badge">💀</span>}
                   </div>
-                  {isPerdendo && (
-                    <div className="perdendo-indicator">ESCOLHENDO</div>
+                  {isPerdendo && <div className="perdendo-indicator">ESCOLHENDO</div>}
+                  {isRevelando && <div className="perdendo-indicator" style={{ background: "#1565c0" }}>REVELANDO</div>}
+                  {votouPasar && (sala.fase === "DUVIDA" || sala.fase === "BLOQUEIO") && (
+                    <div className="vez-indicator" style={{ background: "#2e7d32" }}>✓</div>
                   )}
-                  {isRevelando && (
-                    <div
-                      className="perdendo-indicator"
-                      style={{ background: "#1565c0" }}
-                    >
-                      REVELANDO
-                    </div>
-                  )}
-                  {isVez && vivo && !isPerdendo && !isRevelando && (
+                  {isVez && vivo && !isPerdendo && !isRevelando && !votouPasar && (
                     <div className="vez-indicator">VEZ</div>
                   )}
-                  {vivo && (
-                    <div className="cartas-count">
-                      {(j.cartas || []).length} carta
-                      {(j.cartas || []).length !== 1 ? "s" : ""}
-                    </div>
-                  )}
+                  {vivo && <div className="cartas-count">{(j.cartas || []).length} carta{(j.cartas || []).length !== 1 ? "s" : ""}</div>}
                 </div>
               );
             })}
@@ -496,13 +445,15 @@ export default function Mesa({ minhaInfo }: MesaProps) {
             </div>
           </div>
           <div className="status-fase">{sala.fase}</div>
-          {sala.acaoPendente && sala.fase !== "PERDER_CARTA" && (
+          {acaoPend && sala.fase !== "PERDER_CARTA" && (
             <div className="acao-pendente-info">
-              {jogadores[sala.acaoPendente.autorId]?.nome} usa{" "}
-              <strong>{sala.acaoPendente.tipo}</strong>
-              {sala.acaoPendente.alvoId && (
-                <> em {jogadores[sala.acaoPendente.alvoId]?.nome}</>
-              )}
+              {jogadores[acaoPend.autorId]?.nome} usa <strong>{acaoPend.tipo}</strong>
+              {acaoPend.alvoId && <> em {jogadores[acaoPend.alvoId]?.nome}</>}
+            </div>
+          )}
+          {(sala.fase === "DUVIDA" || sala.fase === "BLOQUEIO") && totalVotos > 0 && (
+            <div className="votos-counter">
+              Confirmados: {votosCount}/{totalVotos}
             </div>
           )}
           {sala.fase === "PERDER_CARTA" && sala.quemPerde && (
@@ -512,8 +463,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
           )}
           {sala.fase === "DUVIDA_BLOQUEIO" && sala.bloqueadorId && (
             <div className="acao-pendente-info" style={{ color: "#90caf9" }}>
-              {jogadores[sala.bloqueadorId]?.nome} bloqueou com{" "}
-              <strong>{sala.bloqueadorPersonagem}</strong>
+              {jogadores[sala.bloqueadorId]?.nome} bloqueou com <strong>{sala.bloqueadorPersonagem}</strong>
             </div>
           )}
         </div>
@@ -522,29 +472,19 @@ export default function Mesa({ minhaInfo }: MesaProps) {
         <div className="menu-acoes">
           <div className="timer-section">
             <div className="timer-bar">
-              <div
-                className="timer-fill"
-                style={{ width: `${timerPercent}%` }}
-              />
+              <div className="timer-fill" style={{ width: `${timerPercent}%` }} />
             </div>
             <div className="timer-label">
-              {String(Math.floor(tempoRestante / 60)).padStart(2, "0")}:
-              {String(tempoRestante % 60).padStart(2, "0")}
+              {String(Math.floor(tempoRestante / 60)).padStart(2, "0")}:{String(tempoRestante % 60).padStart(2, "0")}
             </div>
           </div>
 
           <div className="area-botoes">
             {vencedor ? (
               <>
-                <div className="vencedor-banner">
-                  🏆 {vencedor.nome.toUpperCase()} VENCEU!
-                </div>
+                <div className="vencedor-banner">🏆 {vencedor.nome.toUpperCase()} VENCEU!</div>
                 {minhaInfo.isHost && (
-                  <button
-                    className="btn-acao btn-amarelo"
-                    style={{ marginTop: 12 }}
-                    onClick={reiniciarJogo}
-                  >
+                  <button className="btn-acao btn-amarelo" style={{ marginTop: 12 }} onClick={reiniciarJogo}>
                     <span className="acao-nome">🔄 NOVO JOGO</span>
                     <span className="acao-desc">Voltar ao lobby</span>
                   </button>
@@ -554,60 +494,50 @@ export default function Mesa({ minhaInfo }: MesaProps) {
               <div className="fora-jogo">Você está fora do jogo.</div>
             ) : (
               <>
-                {/* MINHA VEZ */}
+                {/* SUA VEZ */}
                 {sala.fase === "ACAO" && sala.vezDe === minhaInfo.id && (
                   <>
                     <div className="acoes-titulo">SUA VEZ — Escolha uma ação:</div>
-
                     <button className="btn-acao btn-amarelo" onClick={() => pedirAcao("Político")}>
                       <span className="acao-nome">🏛️ Político</span>
                       <span className="acao-desc">+3 💰 (pode ser desafiado)</span>
                     </button>
-
                     <button className="btn-acao btn-amarelo" onClick={() => pedirAcao("Ajuda Externa")}>
                       <span className="acao-nome">🤝 Ajuda Externa</span>
                       <span className="acao-desc">+2 💰 (Político pode bloquear)</span>
                     </button>
-
                     <button className="btn-acao btn-amarelo" onClick={() => pedirAcao("Bicheiro")}>
                       <span className="acao-nome">🎰 Bicheiro</span>
                       <span className="acao-desc">Rouba 2 💰 do alvo</span>
                     </button>
-
                     {minhasMoedas >= 3 && (
                       <button className="btn-acao btn-vermelho" onClick={() => pedirAcao("Bandido")}>
                         <span className="acao-nome">🔪 Bandido</span>
                         <span className="acao-desc">Assassina alvo (-3 💰)</span>
                       </button>
                     )}
-
                     <button className="btn-acao btn-azul" onClick={() => pedirAcao("Investigar")}>
                       <span className="acao-nome">🕵️ Investigar</span>
                       <span className="acao-desc">Ver uma carta do alvo</span>
                     </button>
-
                     <button className="btn-acao btn-azul" onClick={() => pedirAcao("Trocar")}>
                       <span className="acao-nome">🔀 Trocar Carta</span>
-                      <span className="acao-desc">Troca carta do alvo com baralho</span>
+                      <span className="acao-desc">Troca carta do alvo com baralho (-1 💰)</span>
                     </button>
-
                     <button className="btn-acao btn-cinza" onClick={() => pedirAcao("Disfarce")}>
                       <span className="acao-nome">🎭 Disfarce</span>
                       <span className="acao-desc">Troca sua própria carta</span>
                     </button>
-
                     <button className="btn-acao btn-cinza" onClick={() => pedirAcao("Trabalhar")}>
                       <span className="acao-nome">⚒️ Trabalhar</span>
                       <span className="acao-desc">+1 💰 (sempre funciona)</span>
                     </button>
-
                     {minhasMoedas >= 7 && (
                       <button className="btn-acao btn-vermelho" onClick={() => pedirAcao("Golpe")}>
                         <span className="acao-nome">💥 DAR GOLPE</span>
                         <span className="acao-desc">-7 💰 · Alvo perde uma carta</span>
                       </button>
                     )}
-
                     {alvoId ? (
                       <div className="alvo-selecionado">
                         Alvo: <strong>{jogadores[alvoId]?.nome}</strong>
@@ -619,42 +549,47 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                   </>
                 )}
 
-                {/* FASE DUVIDA — outros podem questionar a ação */}
-                {sala.fase === "DUVIDA" &&
-                  acaoPend?.autorId !== minhaInfo.id &&
-                  ACOES_COM_DUVIDA.includes(acaoPend?.tipo || "") && (
-                    <>
-                      <div className="acoes-titulo">DUVIDAR DA AÇÃO?</div>
-                      <button className="btn-acao btn-vermelho" onClick={() => reagir("DUVIDO")}>
-                        <span className="acao-nome">🤔 DUVIDAR!</span>
-                        <span className="acao-desc">Se ganhar: autor perde carta</span>
-                      </button>
-                      <button className="btn-acao btn-cinza" onClick={() => reagir("PASSAR")}>
-                        <span className="acao-nome">✓ PASSAR</span>
-                        <span className="acao-desc">Deixar avançar para bloqueio</span>
-                      </button>
-                    </>
-                  )}
-
-                {/* FASE BLOQUEIO — alvo pode bloquear com personagem */}
-                {possoBloquear && (
+                {/* VOTAÇÃO — DUVIDA ou BLOQUEIO */}
+                {(podeDuvidar || possoBloquear || podePasar) && (
                   <>
-                    <div className="acoes-titulo">BLOQUEAR A AÇÃO?</div>
-                    <button
-                      className="btn-acao btn-azul"
-                      onClick={() => reagir("BLOQUEIO", charParaBloquear!)}
-                    >
-                      <span className="acao-nome">🛡️ Bloquear com {charParaBloquear}</span>
-                      <span className="acao-desc">Autor pode contestar seu bloqueio</span>
-                    </button>
-                    <button className="btn-acao btn-cinza" onClick={() => reagir("PASSAR")}>
-                      <span className="acao-nome">✓ ACEITAR</span>
-                      <span className="acao-desc">Deixar a ação acontecer</span>
-                    </button>
+                    <div className="acoes-titulo">
+                      {sala.fase === "DUVIDA" ? "DUVIDAR DA AÇÃO?" : "BLOQUEAR A AÇÃO?"}
+                    </div>
+
+                    {podeDuvidar && (
+                      <button className="btn-acao btn-vermelho" onClick={() => votar("DUVIDAR")}>
+                        <span className="acao-nome">🤔 DUVIDAR!</span>
+                        <span className="acao-desc">Resolve imediatamente</span>
+                      </button>
+                    )}
+
+                    {possoBloquear && (
+                      <button
+                        className="btn-acao btn-azul"
+                        onClick={() => votar("BLOQUEIO", BLOQUEADOR_CHAR[acaoPend!.tipo])}
+                      >
+                        <span className="acao-nome">🛡️ Bloquear com {BLOQUEADOR_CHAR[acaoPend!.tipo]}</span>
+                        <span className="acao-desc">Autor pode contestar</span>
+                      </button>
+                    )}
+
+                    {podePasar && (
+                      <button className="btn-acao btn-cinza" onClick={() => votar("PASSAR")}>
+                        <span className="acao-nome">✓ PASSAR</span>
+                        <span className="acao-desc">{sala.fase === "DUVIDA" ? "Avança para bloqueio" : "Deixa a ação acontecer"}</span>
+                      </button>
+                    )}
                   </>
                 )}
 
-                {/* FASE DUVIDA_BLOQUEIO — autor pode contestar o bloqueio */}
+                {/* Já votou — aguardando outros */}
+                {jaVotei && (sala.fase === "DUVIDA" || sala.fase === "BLOQUEIO") && (
+                  <div className="aguardando-msg">
+                    Você confirmou ✓ — aguardando os outros ({votosCount}/{totalVotos})
+                  </div>
+                )}
+
+                {/* DUVIDA_BLOQUEIO — autor contesta ou aceita */}
                 {faseDuvidaBloqueio && (
                   <>
                     <div className="acoes-titulo" style={{ color: "#90caf9" }}>
@@ -663,60 +598,37 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                     <div className="aguardando-msg" style={{ marginBottom: 8 }}>
                       {jogadores[sala.bloqueadorId!]?.nome} afirma ter {sala.bloqueadorPersonagem}
                     </div>
-                    <button
-                      className="btn-acao btn-vermelho"
-                      onClick={() => contestarBloqueio(true)}
-                    >
+                    <button className="btn-acao btn-vermelho" onClick={() => contestarBloqueio(true)}>
                       <span className="acao-nome">🤔 DUVIDAR DO BLOQUEIO</span>
-                      <span className="acao-desc">Se vencer: ação executa; se perder: você perde carta</span>
+                      <span className="acao-desc">Vencer: ação executa · Perder: você perde carta</span>
                     </button>
-                    <button
-                      className="btn-acao btn-cinza"
-                      onClick={() => contestarBloqueio(false)}
-                    >
+                    <button className="btn-acao btn-cinza" onClick={() => contestarBloqueio(false)}>
                       <span className="acao-nome">✓ ACEITAR BLOQUEIO</span>
                       <span className="acao-desc">Seu turno termina</span>
                     </button>
                   </>
                 )}
 
-                {/* FASE REVELAR_CARTA — investigado escolhe qual carta mostrar */}
-                {faseRevelar && (
-                  <>
-                    <div className="acoes-titulo" style={{ color: "#90caf9" }}>
-                      🕵️ INVESTIGADO! Escolha qual carta mostrar:
-                    </div>
-                    {minhasCartas.map((c, i) => (
-                      <button
-                        key={i}
-                        className="btn-acao btn-azul"
-                        onClick={() => revelarParaInvestigador(c)}
-                      >
-                        <span className="acao-nome">👁️ Mostrar: {c}</span>
-                        <span className="acao-desc">O investigador verá esta carta</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-
-                {/* MENSAGENS DE AGUARDO */}
-                {((sala.fase === "ACAO" && sala.vezDe !== minhaInfo.id) ||
-                  (sala.fase === "DUVIDA" && acaoPend?.autorId === minhaInfo.id)) && (
-                  <div className="aguardando-msg">
-                    Aguardando {jogadores[sala.vezDe!]?.nome || "outro jogador"}...
-                  </div>
-                )}
-
+                {/* Aguardando outros na DUVIDA_BLOQUEIO */}
                 {sala.fase === "DUVIDA_BLOQUEIO" && !faseDuvidaBloqueio && (
                   <div className="aguardando-msg">
                     {jogadores[acaoPend?.autorId!]?.nome} está decidindo se contesta o bloqueio...
                   </div>
                 )}
 
-                {sala.fase === "BLOQUEIO" && !possoBloquear && (
-                  <div className="aguardando-msg">
-                    Aguardando {jogadores[acaoPend?.alvoId!]?.nome} bloquear ou aceitar...
-                  </div>
+                {/* REVELAR_CARTA */}
+                {faseRevelar && (
+                  <>
+                    <div className="acoes-titulo" style={{ color: "#90caf9" }}>
+                      🕵️ INVESTIGADO! Escolha qual carta mostrar:
+                    </div>
+                    {minhasCartas.map((c, i) => (
+                      <button key={i} className="btn-acao btn-azul" onClick={() => revelarParaInvestigador(c)}>
+                        <span className="acao-nome">👁️ Mostrar: {c}</span>
+                        <span className="acao-desc">O investigador verá esta carta</span>
+                      </button>
+                    ))}
+                  </>
                 )}
 
                 {sala.fase === "REVELAR_CARTA" && !faseRevelar && (
@@ -728,6 +640,12 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                 {sala.fase === "PERDER_CARTA" && !fasePerder && (
                   <div className="aguardando-msg">
                     {jogadores[sala.quemPerde!]?.nome} está escolhendo qual carta perder...
+                  </div>
+                )}
+
+                {sala.fase === "ACAO" && sala.vezDe !== minhaInfo.id && (
+                  <div className="aguardando-msg">
+                    Aguardando {jogadores[sala.vezDe!]?.nome || "outro jogador"}...
                   </div>
                 )}
               </>
@@ -751,17 +669,11 @@ export default function Mesa({ minhaInfo }: MesaProps) {
               >
                 <div className="carta-topo">{fasePerder ? "⚠️" : "★"}</div>
                 <div className="carta-nome">{c}</div>
-                {fasePerder && (
-                  <div className="carta-perder-label">CLIQUE PARA PERDER</div>
-                )}
+                {fasePerder && <div className="carta-perder-label">CLIQUE PARA PERDER</div>}
               </div>
             ))}
           </div>
-          {fasePerder && (
-            <div className="perder-instrucao">
-              Escolha qual carta revelar e perder!
-            </div>
-          )}
+          {fasePerder && <div className="perder-instrucao">Escolha qual carta revelar e perder!</div>}
         </div>
       </div>
     </div>
