@@ -36,7 +36,7 @@ export const PERSONAGENS = [
   "Político",
   "Bicheiro",
   "Bandido",
-  "X9",
+  "Investigador",
   "Juiz",
   "Miliciano",
 ];
@@ -54,13 +54,13 @@ export const PERSONAGEM_INFO: Record<string, { emoji: string; desc: string }> = 
     emoji: "🔪",
     desc: "Custa 3 moedas. Elimina uma carta do alvo. Miliciano bloqueia.",
   },
-  X9: {
+  Investigador: {
     emoji: "🕵️",
-    desc: "Olha uma carta do alvo. Juiz bloqueia.",
+    desc: "Vê carta do alvo, troca carta do alvo com o baralho, ou troca a própria carta (Disfarce). Juiz bloqueia.",
   },
   Juiz: {
     emoji: "⚖️",
-    desc: "Bloqueia investigações do X9.",
+    desc: "Bloqueia investigações do Investigador.",
   },
   Miliciano: {
     emoji: "🛡️",

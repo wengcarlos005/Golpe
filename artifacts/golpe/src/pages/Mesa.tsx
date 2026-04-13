@@ -7,6 +7,8 @@ interface MesaProps {
   minhaInfo: MinhaInfo;
 }
 
+const ACOES_COM_ALVO = ["Bicheiro", "Bandido", "Investigar", "Trocar", "Golpe"];
+
 export default function Mesa({ minhaInfo }: MesaProps) {
   const [sala, setSala] = useState<Sala | null>(null);
   const [alvoId, setAlvoId] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       await update(ref(db, `salas/${minhaInfo.sala}`), {
         fase: "PERDER_CARTA",
         quemPerde: id,
+        acaoPendente: null,
         timerFinal: Date.now() + 15000,
       });
     },
@@ -56,6 +59,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     if (!a) { executandoRef.current = false; return; }
 
     const aut = d.jogadores![a.autorId];
+    const baralho = [...(d.baralho || [])];
     const upd: Record<string, unknown> = {};
 
     if (a.tipo === "Político") {
@@ -75,22 +79,56 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       );
     }
 
-    // Bandido and Golpe enter PERDER_CARTA phase — target chooses which card to lose
     if (a.tipo === "Bandido") {
-      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas - 3;
+      upd[`jogadores/${a.autorId}/moedas`] = Math.max(0, aut.moedas - 3);
       upd.acaoPendente = null;
       await update(ref(db, `salas/${minhaInfo.sala}`), upd);
       await entrarFasePerda(a.alvoId!);
       executandoRef.current = false;
       return;
     }
+
     if (a.tipo === "Golpe") {
-      upd[`jogadores/${a.autorId}/moedas`] = aut.moedas - 7;
+      upd[`jogadores/${a.autorId}/moedas`] = Math.max(0, aut.moedas - 7);
       upd.acaoPendente = null;
       await update(ref(db, `salas/${minhaInfo.sala}`), upd);
       await entrarFasePerda(a.alvoId!);
       executandoRef.current = false;
       return;
+    }
+
+    // Investigar → target reveals a card (REVELAR_CARTA phase)
+    if (a.tipo === "Investigar") {
+      await update(ref(db, `salas/${minhaInfo.sala}`), {
+        fase: "REVELAR_CARTA",
+        timerFinal: Date.now() + 15000,
+      });
+      executandoRef.current = false;
+      return;
+    }
+
+    // Trocar → swap one of target's cards with deck
+    if (a.tipo === "Trocar") {
+      const alvoCa = [...(d.jogadores![a.alvoId!].cartas || [])];
+      if (alvoCa.length > 0) {
+        baralho.push(alvoCa.pop()!);
+        baralho.sort(() => Math.random() - 0.5);
+        if (baralho.length > 0) alvoCa.push(baralho.pop()!);
+      }
+      upd[`jogadores/${a.alvoId!}/cartas`] = alvoCa;
+      upd.baralho = baralho;
+    }
+
+    // Disfarce → swap one of own cards with deck
+    if (a.tipo === "Disfarce") {
+      const autCa = [...(aut.cartas || [])];
+      if (autCa.length > 0) {
+        baralho.push(autCa.pop()!);
+        baralho.sort(() => Math.random() - 0.5);
+        if (baralho.length > 0) autCa.push(baralho.pop()!);
+      }
+      upd[`jogadores/${a.autorId}/cartas`] = autCa;
+      upd.baralho = baralho;
     }
 
     upd.fase = "ACAO";
@@ -127,9 +165,16 @@ export default function Mesa({ minhaInfo }: MesaProps) {
         if (d.fase === "ACAO" && d.vezDe === minhaInfo.id) {
           await passarTurno();
         } else if (d.fase === "PERDER_CARTA" && d.quemPerde === minhaInfo.id) {
-          // Auto-lose first card on timer expiry
           await confirmarPerda(0);
-        } else if (d.fase !== "ACAO" && d.vezDe === minhaInfo.id) {
+        } else if (d.fase === "REVELAR_CARTA" && d.acaoPendente?.alvoId === minhaInfo.id) {
+          const cartas = d.jogadores?.[minhaInfo.id]?.cartas || [];
+          if (cartas.length > 0) await revelarParaInvestigador(cartas[0]);
+        } else if (
+          d.fase !== "ACAO" &&
+          d.fase !== "PERDER_CARTA" &&
+          d.fase !== "REVELAR_CARTA" &&
+          d.vezDe === minhaInfo.id
+        ) {
           await executarEfeito();
         }
       }
@@ -155,7 +200,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/cartas`),
       cartas
     );
-    await adicionarLog(`@${minhaInfo.nome} perdeu ${cartaPerdida}`);
+    await adicionarLog(`⚠️ ${minhaInfo.nome} perdeu ${cartaPerdida}`);
     await update(ref(db, `salas/${minhaInfo.sala}`), {
       fase: "ACAO",
       quemPerde: null,
@@ -163,8 +208,20 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     await passarTurno();
   }
 
+  async function revelarParaInvestigador(carta: string) {
+    const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
+    const d = snap.val() as Sala;
+    const autorNome = d.jogadores?.[d.acaoPendente?.autorId!]?.nome || "Investigador";
+    await adicionarLog(`🕵️ ${autorNome} viu: ${carta} (de ${minhaInfo.nome})`);
+    await update(ref(db, `salas/${minhaInfo.sala}`), {
+      fase: "ACAO",
+      acaoPendente: null,
+    });
+    await passarTurno();
+  }
+
   async function pedirAcao(tipo: string) {
-    if (["Bicheiro", "Bandido", "Golpe"].includes(tipo) && !alvoId) {
+    if (ACOES_COM_ALVO.includes(tipo) && !alvoId) {
       alert("Selecione um alvo clicando em um jogador!");
       return;
     }
@@ -183,13 +240,16 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       return;
     }
 
-    const fase = tipo === "Trabalhar" || tipo === "Golpe" ? "EXECUCAO" : "DUVIDA";
+    // Trabalhar and Golpe skip challenge — go straight to EXECUCAO
+    const fase =
+      tipo === "Trabalhar" || tipo === "Golpe" ? "EXECUCAO" : "DUVIDA";
+
     await update(ref(db, `salas/${minhaInfo.sala}`), {
       acaoPendente: { autorId: minhaInfo.id, tipo, alvoId: alvoId || null },
       fase,
       timerFinal: Date.now() + 10000,
     });
-    await adicionarLog(`@${minhaInfo.nome} usou ${tipo}`);
+    await adicionarLog(`▶ ${minhaInfo.nome} usou ${tipo}`);
     if (fase === "EXECUCAO") await executarEfeito();
   }
 
@@ -199,24 +259,48 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     const a = d.acaoPendente as AcaoPendente;
 
     if (r === "DUVIDO") {
-      const temCarta = (d.jogadores![a.autorId].cartas || []).includes(a.tipo);
+      // Investigar/Trocar/Disfarce all require "Investigador" card
+      const cartaNecessaria =
+        ["Investigar", "Trocar", "Disfarce"].includes(a.tipo)
+          ? "Investigador"
+          : a.tipo;
+      const temCarta = (d.jogadores![a.autorId].cartas || []).includes(
+        cartaNecessaria
+      );
       if (temCarta) {
-        // Doubter is wrong — doubter loses a card, then action executes
+        // Doubter wrong — doubter loses a card, then action executes
         await entrarFasePerda(minhaInfo.id);
       } else {
-        // Author bluffed — author loses a card, turn passes
+        // Bluff caught — author loses a card, turn passes
         await entrarFasePerda(a.autorId);
       }
     } else if (r === "BLOQUEIO") {
+      // When Bandido is blocked, author still pays 3 coins
+      if (a.tipo === "Bandido") {
+        const autorMoedas = d.jogadores![a.autorId].moedas;
+        await update(ref(db, `salas/${minhaInfo.sala}/jogadores/${a.autorId}`), {
+          moedas: Math.max(0, autorMoedas - 3),
+        });
+        await adicionarLog(`🛡️ ${minhaInfo.nome} bloqueou Bandido (autor pagou 3 💰)`);
+      } else {
+        await adicionarLog(`🛡️ ${minhaInfo.nome} bloqueou ${a.tipo}`);
+      }
+      // Block passes turn immediately — no DUVIDA_BLOQUEIO
       await update(ref(db, `salas/${minhaInfo.sala}`), {
-        fase: "DUVIDA_BLOQUEIO",
-        timerFinal: Date.now() + 10000,
+        fase: "ACAO",
+        acaoPendente: null,
+        quemPerde: null,
       });
+      await passarTurno();
     } else {
+      // PASSAR
       if (
         d.fase === "DUVIDA" &&
-        ["Bicheiro", "Bandido", "Ajuda Externa"].includes(a.tipo)
+        ["Bicheiro", "Bandido", "Ajuda Externa", "Investigar", "Trocar", "Disfarce"].includes(
+          a.tipo
+        )
       ) {
+        // Offer target a chance to block
         await update(ref(db, `salas/${minhaInfo.sala}`), {
           fase: "BLOQUEIO",
           timerFinal: Date.now() + 10000,
@@ -258,6 +342,8 @@ export default function Mesa({ minhaInfo }: MesaProps) {
 
   const fasePerder =
     sala.fase === "PERDER_CARTA" && sala.quemPerde === minhaInfo.id;
+  const faseRevelar =
+    sala.fase === "REVELAR_CARTA" && sala.acaoPendente?.alvoId === minhaInfo.id;
 
   return (
     <div className="mesa-wrapper">
@@ -286,6 +372,8 @@ export default function Mesa({ minhaInfo }: MesaProps) {
               const isAlvo = id === alvoId;
               const isPerdendo =
                 sala.fase === "PERDER_CARTA" && sala.quemPerde === id;
+              const isRevelando =
+                sala.fase === "REVELAR_CARTA" && sala.acaoPendente?.alvoId === id;
               return (
                 <div
                   key={id}
@@ -306,7 +394,12 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                   {isPerdendo && (
                     <div className="perdendo-indicator">ESCOLHENDO</div>
                   )}
-                  {isVez && vivo && !isPerdendo && (
+                  {isRevelando && (
+                    <div className="perdendo-indicator" style={{ background: "#1565c0" }}>
+                      REVELANDO
+                    </div>
+                  )}
+                  {isVez && vivo && !isPerdendo && !isRevelando && (
                     <div className="vez-indicator">VEZ</div>
                   )}
                   {vivo && (
@@ -340,6 +433,11 @@ export default function Mesa({ minhaInfo }: MesaProps) {
           {sala.fase === "PERDER_CARTA" && sala.quemPerde && (
             <div className="acao-pendente-info perdendo-aviso">
               {jogadores[sala.quemPerde]?.nome} deve escolher uma carta para perder
+            </div>
+          )}
+          {sala.fase === "REVELAR_CARTA" && sala.acaoPendente?.alvoId && (
+            <div className="acao-pendente-info" style={{ color: "#90caf9" }}>
+              {jogadores[sala.acaoPendente.alvoId]?.nome} está sendo investigado
             </div>
           )}
         </div>
@@ -419,6 +517,30 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                     )}
 
                     <button
+                      className="btn-acao btn-azul"
+                      onClick={() => pedirAcao("Investigar")}
+                    >
+                      <span className="acao-nome">🕵️ Investigar</span>
+                      <span className="acao-desc">Ver uma carta do alvo</span>
+                    </button>
+
+                    <button
+                      className="btn-acao btn-azul"
+                      onClick={() => pedirAcao("Trocar")}
+                    >
+                      <span className="acao-nome">🔀 Trocar Carta</span>
+                      <span className="acao-desc">Troca carta do alvo com baralho</span>
+                    </button>
+
+                    <button
+                      className="btn-acao btn-cinza"
+                      onClick={() => pedirAcao("Disfarce")}
+                    >
+                      <span className="acao-nome">🎭 Disfarce</span>
+                      <span className="acao-desc">Troca sua própria carta</span>
+                    </button>
+
+                    <button
                       className="btn-acao btn-cinza"
                       onClick={() => pedirAcao("Trabalhar")}
                     >
@@ -432,7 +554,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                         onClick={() => pedirAcao("Golpe")}
                       >
                         <span className="acao-nome">💥 DAR GOLPE</span>
-                        <span className="acao-desc">-7 💰 · Alvo escolhe carta a perder</span>
+                        <span className="acao-desc">-7 💰 · Alvo perde uma carta</span>
                       </button>
                     )}
 
@@ -496,6 +618,25 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                     </>
                   )}
 
+                {/* REVELAR CARTA para o Investigador */}
+                {faseRevelar && (
+                  <>
+                    <div className="acoes-titulo" style={{ color: "#90caf9" }}>
+                      🕵️ INVESTIGADO! Escolha qual carta mostrar:
+                    </div>
+                    {minhasCartas.map((c, i) => (
+                      <button
+                        key={i}
+                        className="btn-acao btn-azul"
+                        onClick={() => revelarParaInvestigador(c)}
+                      >
+                        <span className="acao-nome">👁️ Mostrar: {c}</span>
+                        <span className="acao-desc">O investigador verá esta carta</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+
                 {((sala.fase === "ACAO" && sala.vezDe !== minhaInfo.id) ||
                   (sala.fase === "DUVIDA" &&
                     sala.acaoPendente?.autorId === minhaInfo.id)) && (
@@ -505,8 +646,10 @@ export default function Mesa({ minhaInfo }: MesaProps) {
                   </div>
                 )}
 
-                {sala.fase === "DUVIDA_BLOQUEIO" && (
-                  <div className="aguardando-msg">Bloqueio em andamento...</div>
+                {sala.fase === "REVELAR_CARTA" && !faseRevelar && (
+                  <div className="aguardando-msg">
+                    {jogadores[sala.acaoPendente?.alvoId!]?.nome} está escolhendo qual carta revelar...
+                  </div>
                 )}
 
                 {sala.fase === "PERDER_CARTA" && !fasePerder && (
