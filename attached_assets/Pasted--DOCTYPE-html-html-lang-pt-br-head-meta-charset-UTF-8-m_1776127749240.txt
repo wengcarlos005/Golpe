@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOLPE - Operação Brasil Final</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+    <style>
+        :root {
+            --yellow: #ffcc00;
+            --gold: #ffd700;
+            --bg-dark: #050508;
+            --panel: rgba(20, 20, 30, 0.98);
+            --border: rgba(255, 255, 255, 0.1);
+            --red: #ff3b3b;
+            --blue: #2196f3;
+        }
+
+        * { box-sizing: border-box; outline: none; }
+        body, html { 
+            margin: 0; padding: 0; 
+            background: var(--bg-dark); 
+            color: white; 
+            font-family: 'Montserrat', sans-serif;
+            height: 100vh; width: 100vw;
+            overflow: hidden;
+        }
+
+        .screen { display: none; height: 100vh; width: 100vw; position: absolute; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        .active { display: flex; }
+
+        #ui-mesa {
+            display: grid;
+            grid-template-columns: 320px 1fr 320px;
+            grid-template-rows: 1fr 240px;
+            height: 100vh; width: 100vw;
+        }
+
+        .side-panel { background: #0a0a0f; border: 1px solid var(--border); display: flex; flex-direction: column; z-index: 20; }
+        
+        .arena { 
+            position: relative; display: flex; align-items: center; justify-content: center;
+            background: radial-gradient(circle, rgba(255,204,0,0.06) 0%, transparent 70%);
+        }
+
+        .table-circle {
+            position: relative; width: 520px; height: 520px; 
+            border: 4px solid rgba(255,215,0,0.05); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .timer-center {
+            position: absolute; width: 120px; height: 120px;
+            background: rgba(0,0,0,0.9); border: 2px solid var(--yellow);
+            border-radius: 50%; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 50;
+        }
+        .timer-val { font-size: 32px; font-weight: 900; color: var(--yellow); font-family: 'Syncopate'; }
+
+        .player-node { position: absolute; width: 190px; text-align: center; }
+        .node-box {
+            background: linear-gradient(145deg, #1a1a2e, #0f0f1a); 
+            border: 2px solid #333; padding: 20px;
+            border-radius: 25px; transition: 0.3s;
+        }
+        .node-box.active-turn { border-color: var(--yellow); transform: scale(1.05); }
+        .node-name { font-size: 14px; font-weight: 900; margin-bottom: 5px; text-transform: uppercase; }
+
+        .action-overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #0d0d16; border: 3px solid var(--yellow); padding: 40px;
+            border-radius: 35px; z-index: 500; text-align: center; width: 420px;
+            box-shadow: 0 0 100px rgba(0,0,0,1); display: none;
+        }
+
+        .bottom-bar {
+            grid-column: 1 / 4; background: #06060c;
+            border-top: 3px solid var(--border); display: flex;
+            align-items: center; justify-content: space-between; padding: 0 60px;
+        }
+
+        .card-large {
+            width: 140px; height: 190px; background: #1a1a2e;
+            border: 2px solid rgba(255,255,255,0.1); border-radius: 15px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            cursor: pointer; transition: 0.2s; margin-bottom: 10px;
+        }
+        .card-large:hover { border-color: var(--yellow); transform: translateY(-10px); }
+        .card-large.selected { border-color: var(--yellow); background: rgba(255,204,0,0.1); }
+
+        .btn-action {
+            background: var(--yellow); color: black; border: none; padding: 14px;
+            border-radius: 10px; font-weight: 900; cursor: pointer; margin-top: 5px;
+            width: 100%; text-transform: uppercase; font-size: 11px;
+        }
+        .btn-action:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-vasco { background: var(--red); color: white; }
+
+        #log-box { flex: 1; overflow-y: auto; padding: 20px; font-size: 12px; }
+        .log-msg { margin-bottom: 10px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.05); }
+
+        /* SELETOR DE CARTA MODAL */
+        #card-selector-modal {
+            position: fixed; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.9); z-index: 1000; display: none;
+            flex-direction: column; align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- MODAL DE SELEÇÃO DE CARTA -->
+    <div id="card-selector-modal">
+        <h2 id="selector-title" style="font-family:'Syncopate'; color:var(--yellow); margin-bottom:30px;">ESCOLHA UMA CARTA</h2>
+        <div id="selector-cards-container" style="display:flex; gap:20px;"></div>
+    </div>
+
+    <!-- TELA LOGIN -->
+    <div id="screen-login" class="screen active">
+        <div style="background:var(--panel); padding:40px; border-radius:30px; border:1px solid var(--border); width:400px; text-align:center;">
+            <h1 style="font-family:'Syncopate'; color:var(--yellow);">GOLPE</h1>
+            <input id="input-sala" placeholder="SALA" style="background:#000; border:1px solid #333; color:white; padding:15px; width:100%; border-radius:10px; margin-bottom:10px; text-align:center;">
+            <input id="input-nome" placeholder="NOME" style="background:#000; border:1px solid #333; color:white; padding:15px; width:100%; border-radius:10px; margin-bottom:20px; text-align:center;">
+            <button class="btn-action" onclick="entrar()">JOGAR</button>
+        </div>
+    </div>
+
+    <!-- TELA JOGO -->
+    <div id="screen-game" class="screen" style="padding:0">
+        <div id="ui-mesa">
+            <div class="side-panel">
+                <div style="padding:15px; font-family:'Syncopate'; font-size:10px; color:var(--yellow); border-bottom:1px solid var(--border);">HISTÓRICO</div>
+                <div id="log-box"></div>
+                <button class="btn-action" style="background:#444; color:white; margin:10px;" onclick="resetarJogo()">REINICIAR SALA</button>
+            </div>
+
+            <div class="arena">
+                <div class="timer-center">
+                    <div class="timer-val" id="timer-number">--</div>
+                </div>
+                <div class="table-circle" id="adversarios-container"></div>
+                <div id="action-ui" class="action-overlay">
+                    <h3 id="action-title" style="color:var(--yellow);">ACAO</h3>
+                    <p id="action-desc">...</p>
+                    <div id="action-btns" style="display:flex; flex-direction:column; gap:10px;"></div>
+                </div>
+            </div>
+
+            <div class="side-panel" style="padding:20px;">
+                <h3 style="font-family:'Syncopate'; font-size:10px; text-align:center;">GOLPES</h3>
+                <div id="meu-menu-acoes">
+                    <button class="btn-action" id="btn-t" onclick="fazerAcao('trabalhar')">Ir ali fazer um trampo (+1💰)</button>
+                    <button class="btn-action" id="btn-a" onclick="fazerAcao('ajuda')">Imposto é Roubo (+2💰)</button>
+                    <button class="btn-action" id="btn-p" onclick="fazerAcao('politico')">Faz o L (+3💰)</button>
+                    <button class="btn-action" id="btn-b" onclick="fazerAcao('bicheiro')">Puxar o Bicho</button>
+                    <button class="btn-action" id="btn-x" onclick="fazerAcao('investigar')">Acionar o X9</button>
+                    <button class="btn-action btn-vasco" id="btn-v" onclick="fazerAcao('assassino')">Mandar pro Vasco (-3💰)</button>
+                </div>
+                <div id="alerta-10" style="color:var(--red); font-size:10px; text-align:center; margin-top:10px; display:none;">VOCÊ ESTÁ RICO! USE O VASCO.</div>
+            </div>
+
+            <div class="bottom-bar">
+                <div style="width:200px">
+                    <div id="my-coins" style="font-size:40px; font-weight:900; color:var(--gold);">💰 1</div>
+                </div>
+                <div class="my-hand" id="my-cards" style="display:flex; gap:15px;"></div>
+                <div style="width:200px; text-align:right">
+                    <div id="display-nome" style="font-family:'Syncopate'; font-size:14px; color:var(--yellow);">---</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyCj6Q8eWBiiBXOx_7vOICzGHjBSDYFNV2Q",
+        databaseURL: "https://golpe-63ee3-default-rtdb.firebaseio.com",
+        projectId: "golpe-63ee3",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let salaID, jogadorID, alvoID = null;
+    let localCards = [];
+    let localCoins = 0;
+
+    const TRADUCAO = {
+        'trabalhar': 'Trampo', 'ajuda': 'Imposto', 'politico': 'Faz o L',
+        'bicheiro': 'Bicho', 'investigar': 'X9', 'assassino': 'Vasco'
+    };
+
+    function entrar() {
+        salaID = document.getElementById("input-sala").value;
+        let nome = document.getElementById("input-nome").value;
+        if(!salaID || !nome) return;
+        jogadorID = "p_" + Date.now();
+        document.getElementById("display-nome").innerText = nome.toUpperCase();
+        document.getElementById("screen-login").classList.remove("active");
+        document.getElementById("screen-game").classList.add("active");
+
+        const baralho = ["Político", "Político", "Miliciano", "Miliciano", "Assassino", "Assassino", "X9", "X9", "Juiz", "Juiz"];
+        const c1 = baralho.splice(Math.floor(Math.random()*baralho.length), 1)[0];
+        const c2 = baralho.splice(Math.floor(Math.random()*baralho.length), 1)[0];
+
+        db.ref(`salas/${salaID}/jogadores/${jogadorID}`).set({
+            nome, moedas: 1, vivo: true, cartas: [c1, c2]
+        });
+        ouvir();
+    }
+
+    function ouvir() {
+        db.ref(`salas/${salaID}`).on("value", snap => {
+            const d = snap.val();
+            if(!d) return;
+            render(d);
+        });
+    }
+
+    function render(dados) {
+        const jogadores = dados.jogadores || {};
+        const eu = jogadores[jogadorID];
+        if(!eu) return;
+
+        localCards = eu.cartas || [];
+        localCoins = eu.moedas || 0;
+        document.getElementById("my-coins").innerText = `💰 ${localCoins}`;
+        document.getElementById("my-cards").innerHTML = localCards.map(c => `
+            <div class="card-large"><i class="fa-solid ${getIcon(c)}"></i><span style="font-size:10px">${c.toUpperCase()}</span></div>
+        `).join('');
+
+        // Adversários
+        const container = document.getElementById("adversarios-container");
+        container.innerHTML = "";
+        const outros = Object.keys(jogadores).filter(id => id !== jogadorID);
+        outros.forEach((id, i) => {
+            const angle = (i / outros.length) * 2 * Math.PI - Math.PI/2;
+            const x = Math.cos(angle) * 250;
+            const y = Math.sin(angle) * 250;
+            const isTurn = dados.turnoAtual === id;
+            container.innerHTML += `
+                <div class="player-node" style="left: calc(50% + ${x}px - 95px); top: calc(50% + ${y}px - 70px)">
+                    <div class="node-box ${alvoID === id ? 'is-target' : ''} ${isTurn ? 'active-turn' : ''}" onclick="selecionarAlvo('${id}')">
+                        <div class="node-name">${jogadores[id].nome}</div>
+                        <div style="font-weight:900; color:var(--gold)">💰 ${jogadores[id].moedas}</div>
+                        <div style="display:flex; gap:3px; justify-content:center; margin-top:5px;">
+                            ${jogadores[id].cartas ? jogadores[id].cartas.map(() => `<div style="width:10px; height:15px; background:#555; border-radius:2px"></div>`).join('') : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        // Logica de Turno e Timer
+        const isMyTurn = dados.turnoAtual === jogadorID;
+        const acaoAtiva = dados.acaoAtual && !dados.acaoAtual.finalizada;
+        
+        const timerUI = document.getElementById("timer-number");
+        if(acaoAtiva) {
+            const diff = Math.ceil((dados.acaoAtual.tempoFim - Date.now()) / 1000);
+            timerUI.innerText = Math.max(0, diff);
+            gestaoReacao(dados.acaoAtual, jogadores);
+        } else {
+            const diffTurno = Math.ceil((dados.turnoFim - Date.now()) / 1000);
+            timerUI.innerText = Math.max(0, diffTurno);
+            document.getElementById("action-ui").style.display = "none";
+        }
+
+        // Bloqueio de Ações (Regra das 10 moedas)
+        const menu = document.getElementById("meu-menu-acoes");
+        const alerta = document.getElementById("alerta-10");
+        if(isMyTurn && !acaoAtiva) {
+            menu.style.opacity = "1";
+            menu.style.pointerEvents = "all";
+            if(localCoins >= 10) {
+                ["btn-t", "btn-a", "btn-p", "btn-b", "btn-x"].forEach(id => document.getElementById(id).disabled = true);
+                alerta.style.display = "block";
+            } else {
+                ["btn-t", "btn-a", "btn-p", "btn-b", "btn-x"].forEach(id => document.getElementById(id).disabled = false);
+                alerta.style.display = "none";
+            }
+        } else {
+            menu.style.opacity = "0.3";
+            menu.style.pointerEvents = "none";
+        }
+
+        // Histórico
+        const logBox = document.getElementById("log-box");
+        if(dados.logs) logBox.innerHTML = Object.values(dados.logs).reverse().map(l => `<div class="log-msg">${l}</div>`).join('');
+    }
+
+    function selecionarAlvo(id) { alvoID = id; }
+
+    function fazerAcao(tipo) {
+        if(["bicheiro", "investigar", "assassino"].includes(tipo) && !alvoID) return alert("Selecione um alvo!");
+        
+        // Desconto imediato para Vasco (Golpe de Estado)
+        if(tipo === 'assassino') {
+            if(localCoins < 3) return alert("Dinheiro insuficiente!");
+            db.ref(`salas/${salaID}/jogadores/${jogadorID}/moedas`).transaction(m => Math.max(0, m - 3));
+        }
+
+        const acao = {
+            tipo, de: jogadorID, para: alvoID,
+            tempoFim: Date.now() + 15000, finalizada: false
+        };
+
+        db.ref(`salas/${salaID}/acaoAtual`).set(acao);
+        db.ref(`salas/${salaID}/logs`).push(`📢 <b>${TRADUCAO[tipo]}</b> iniciado.`);
+        alvoID = null;
+
+        // Se for trampo, encerra logo o turno na lógica do servidor simulada
+        if(tipo === 'trabalhar') {
+            db.ref(`salas/${salaID}/acaoAtual/finalizada`).set(true);
+        }
+    }
+
+    function gestaoReacao(acao, jogadores) {
+        const ui = document.getElementById("action-ui");
+        const btns = document.getElementById("action-btns");
+        const souAlvo = acao.para === jogadorID;
+        let mostrar = false;
+        btns.innerHTML = "";
+
+        if(acao.de !== jogadorID) {
+            if(acao.tipo === 'politico' || acao.tipo === 'ajuda') {
+                mostrar = true;
+                document.getElementById("action-title").innerText = TRADUCAO[acao.tipo].toUpperCase();
+                btns.innerHTML += `<button class="btn-action btn-vasco" onclick="reagir('duvidar')">DUVIDAR</button>`;
+                if(acao.tipo === 'ajuda') btns.innerHTML += `<button class="btn-action" onclick="reagir('bloquear', 'Político')">POLÍTICO</button>`;
+            } else if(souAlvo) {
+                mostrar = true;
+                document.getElementById("action-title").innerText = TRADUCAO[acao.tipo].toUpperCase();
+                btns.innerHTML += `<button class="btn-action btn-vasco" onclick="reagir('duvidar')">DUVIDAR</button>`;
+                if(acao.tipo === 'assassino' || acao.tipo === 'bicheiro') btns.innerHTML += `<button class="btn-action" onclick="reagir('bloquear', 'Miliciano')">MILICIANO</button>`;
+                if(acao.tipo === 'investigar') btns.innerHTML += `<button class="btn-action" onclick="reagir('bloquear', 'Juiz')">JUIZ</button>`;
+            }
+        }
+
+        if(mostrar) {
+            ui.style.display = "block";
+            btns.innerHTML += `<button class="btn-action" style="background:#333; color:white" onclick="document.getElementById('action-ui').style.display='none'">IGNORAR</button>`;
+        }
+    }
+
+    function reagir(modo) {
+        db.ref(`salas/${salaID}/acaoAtual`).update({ finalizada: true, contestada: true });
+        db.ref(`salas/${salaID}/logs`).push(`🔥 Contestação!`);
+        document.getElementById("action-ui").style.display = "none";
+    }
+
+    function resetarJogo() {
+        if(confirm("Deseja mesmo reiniciar a sala?")) {
+            db.ref(`salas/${salaID}`).remove();
+            location.reload();
+        }
+    }
+
+    // LÓGICA DE SERVIDOR SIMULADA
+    setInterval(() => {
+        db.ref(`salas/${salaID}`).once('value', snap => {
+            const d = snap.val();
+            if(!d || !d.jogadores) return;
+
+            // Inicia Turno
+            if(!d.turnoFim) {
+                db.ref(`salas/${salaID}`).update({
+                    turnoAtual: Object.keys(d.jogadores)[0],
+                    turnoFim: Date.now() + 30000
+                });
+                return;
+            }
+
+            // Ação expirou
+            if(d.acaoAtual && !d.acaoAtual.finalizada && Date.now() > d.acaoAtual.tempoFim) {
+                concluirAcao(d.acaoAtual, d);
+                return;
+            }
+
+            // Turno expirou
+            if((!d.acaoAtual || d.acaoAtual.finalizada) && Date.now() > d.turnoFim) {
+                passarTurno(d);
+            }
+        });
+    }, 1500);
+
+    function concluirAcao(acao, dados) {
+        const deRef = db.ref(`salas/${salaID}/jogadores/${acao.de}`);
+        if(acao.tipo === 'trabalhar') deRef.child("moedas").transaction(m => Math.min(10, (m || 0) + 1));
+        if(acao.tipo === 'ajuda') deRef.child("moedas").transaction(m => Math.min(10, (m || 0) + 2));
+        if(acao.tipo === 'politico') deRef.child("moedas").transaction(m => Math.min(10, (m || 0) + 3));
+        
+        if(acao.tipo === 'assassino') {
+            // O alvo escolhe a carta no modal
+            if(acao.para === jogadorID) abrirSeletorCarta("PERDER UMA CARTA", "perder");
+        }
+
+        db.ref(`salas/${salaID}/acaoAtual/finalizada`).set(true);
+    }
+
+    function abrirSeletorCarta(titulo, modo) {
+        const modal = document.getElementById("card-selector-modal");
+        const container = document.getElementById("selector-cards-container");
+        document.getElementById("selector-title").innerText = titulo;
+        container.innerHTML = "";
+        
+        localCards.forEach((c, i) => {
+            const div = document.createElement("div");
+            div.className = "card-large";
+            div.innerHTML = `<i class="fa-solid ${getIcon(c)}"></i><span>${c}</span>`;
+            div.onclick = () => {
+                if(modo === "perder") {
+                    let novas = [...localCards];
+                    novas.splice(i, 1);
+                    db.ref(`salas/${salaID}/jogadores/${jogadorID}/cartas`).set(novas);
+                }
+                modal.style.display = "none";
+            };
+            container.appendChild(div);
+        });
+        modal.style.display = "flex";
+    }
+
+    function passarTurno(dados) {
+        const jids = Object.keys(dados.jogadores);
+        const next = jids[(jids.indexOf(dados.turnoAtual) + 1) % jids.length];
+        db.ref(`salas/${salaID}`).update({
+            turnoAtual: next, turnoFim: Date.now() + 30000, acaoAtual: null
+        });
+    }
+
+    function getIcon(c) {
+        const icons = {"Político":"fa-user-tie", "Miliciano":"fa-shield-halved", "Assassino":"fa-skull", "X9":"fa-mask", "Juiz":"fa-gavel"};
+        return icons[c] || "fa-id-card";
+    }
+</script>
+</body>
+</html>

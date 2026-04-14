@@ -50,7 +50,7 @@ export default function Lobby({ minhaInfo, onIniciar }: LobbyProps) {
         baralho[idx * 2],
         baralho[idx * 2 + 1],
       ];
-      upd[`jogadores/${id}/moedas`] = 3;
+      upd[`jogadores/${id}/moedas`] = 1;
     });
 
     await update(ref(db, `salas/${minhaInfo.sala}`), upd);
