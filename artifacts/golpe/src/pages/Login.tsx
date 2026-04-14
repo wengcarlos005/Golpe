@@ -54,6 +54,12 @@ export default function Login({ onConectar, onVoltar }: LoginProps) {
         setLoading(false);
         return;
       }
+      const salaData = snap.val();
+      if (salaData?.iniciado) {
+        setErro("Jogo em andamento! Espere a próxima partida.");
+        setLoading(false);
+        return;
+      }
       const id = "p_" + Date.now();
       const info: MinhaInfo = { nome: nome.trim(), id, sala: cod, isHost: false };
       await set(ref(db, `salas/${cod}/jogadores/${id}`), {

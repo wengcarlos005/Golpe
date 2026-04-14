@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOLPE - Operação Brasil</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+    <style>
+        :root {
+            --yellow: #ffcc00;
+            --gold: #ffd700;
+            --bg-dark: #050508;
+            --panel: rgba(20, 20, 30, 0.98);
+            --border: rgba(255, 255, 255, 0.1);
+            --red: #ff3b3b;
+            --blue: #2196f3;
+            --green: #4caf50;
+        }
+
+        * { box-sizing: border-box; outline: none; }
+        body, html { 
+            margin: 0; padding: 0; 
+            background: var(--bg-dark); 
+            color: white; 
+            font-family: 'Montserrat', sans-serif;
+            height: 100vh; width: 100vw;
+            overflow: hidden;
+        }
+
+        .screen { display: none; height: 100vh; width: 100vw; position: absolute; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        .active { display: flex; }
+
+        #ui-mesa {
+            display: grid;
+            grid-template-columns: 320px 1fr 320px;
+            grid-template-rows: 1fr 240px;
+            height: 100vh; width: 100vw;
+        }
+
+        .side-panel { background: #0a0a0f; border: 1px solid var(--border); display: flex; flex-direction: column; z-index: 20; }
+        
+        .arena { 
+            position: relative; display: flex; align-items: center; justify-content: center;
+            background: radial-gradient(circle, rgba(255,204,0,0.06) 0%, transparent 70%);
+        }
+
+        .table-circle {
+            position: relative; width: 520px; height: 520px; 
+            border: 4px solid rgba(255,215,0,0.05); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* TIMER NO CENTRO */
+        .timer-center {
+            position: absolute; width: 130px; height: 130px;
+            background: rgba(0,0,0,0.95); border: 2px solid var(--yellow);
+            border-radius: 50%; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 50;
+            text-align: center;
+        }
+        .timer-val { font-size: 36px; font-weight: 900; color: var(--yellow); font-family: 'Syncopate', sans-serif; }
+        .timer-label { font-size: 9px; opacity: 0.6; text-transform: uppercase; margin-top: 5px; }
+
+        /* PERFIL DO JOGADOR */
+        .player-node { position: absolute; width: 180px; text-align: center; transition: transform 0.3s ease; }
+        .node-box {
+            background: linear-gradient(145deg, #1a1a2e, #0f0f1a); 
+            border: 2px solid #333; padding: 15px;
+            border-radius: 20px; cursor: pointer;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+        }
+        .node-box.active-turn { border-color: var(--yellow); box-shadow: 0 0 15px rgba(255,204,0,0.2); }
+        .node-box.is-target { border-color: var(--red); }
+        .node-name { font-size: 13px; font-weight: 900; color: white; margin-bottom: 5px; text-transform: uppercase; }
+        .node-coins { font-size: 20px; font-weight: 900; color: var(--gold); }
+
+        /* OVERLAY DE REAÇÃO UNIFICADO */
+        .action-overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #0d0d16; border: 3px solid var(--yellow); padding: 35px;
+            border-radius: 30px; z-index: 500; text-align: center; width: 440px;
+            box-shadow: 0 0 100px rgba(0,0,0,1); display: none;
+        }
+
+        .btn-action {
+            background: var(--yellow); color: black; border: none; padding: 14px;
+            border-radius: 12px; font-weight: 900; cursor: pointer; transition: 0.2s;
+            text-transform: uppercase; font-size: 11px; width: 100%;
+        }
+        .btn-action:hover:not(:disabled) { transform: translateY(-2px); background: var(--gold); }
+        .btn-action:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-block { background: var(--blue); color: white; }
+        .btn-pass { background: #333; color: white; margin-top: 5px; }
+        .btn-vasco { background: var(--red); color: white; }
+
+        /* BARRA INFERIOR */
+        .bottom-bar {
+            grid-column: 1 / 4; background: #06060c;
+            border-top: 2px solid var(--border); display: flex;
+            align-items: center; justify-content: space-between; padding: 0 50px;
+        }
+
+        .card-large {
+            width: 140px; height: 180px; background: #1a1a2e;
+            border: 2px solid rgba(255,255,255,0.1); border-radius: 15px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            cursor: pointer; transition: 0.2s;
+        }
+        .card-large i { font-size: 40px; color: var(--yellow); margin-bottom: 10px; }
+
+        #log-box { flex: 1; overflow-y: auto; padding: 20px; font-size: 12px; border-top: 1px solid var(--border); }
+        .log-msg { margin-bottom: 8px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.03); }
+
+        /* MODAIS ESPECÍFICOS */
+        .full-modal {
+            position: fixed; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.95); z-index: 1000; display: none;
+            flex-direction: column; align-items: center; justify-content: center;
+        }
+
+        /* NOTIFICAÇÃO PRIVADA X9 */
+        #x9-result-popup {
+            position: fixed; top: 20px; right: 20px; background: var(--panel);
+            border: 2px solid var(--blue); padding: 20px; border-radius: 15px;
+            z-index: 1100; display: none; width: 250px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- MODAL DE SELEÇÃO DE CARTA -->
+    <div id="card-selector-modal" class="full-modal">
+        <h2 id="selector-title" style="font-family:'Syncopate'; color:var(--yellow); margin-bottom:30px;">ESCOLHA A CARTA</h2>
+        <div id="selector-cards-container" style="display:flex; gap:20px;"></div>
+    </div>
+
+    <!-- POPUP PRIVADO X9 -->
+    <div id="x9-result-popup">
+        <h4 style="color:var(--blue); margin-top:0;">RESULTADO X9</h4>
+        <p id="x9-text" style="font-size:14px; line-height:1.4;"></p>
+        <button class="btn-action" style="padding:10px;" onclick="this.parentElement.style.display='none'">FECHAR</button>
+    </div>
+
+    <!-- TELA LOGIN -->
+    <div id="screen-login" class="screen active">
+        <div style="background:var(--panel); padding:40px; border-radius:30px; border:1px solid var(--border); width:400px; text-align:center;">
+            <h1 style="font-family:'Syncopate'; color:var(--yellow); font-size:2.5em; margin-bottom:10px;">GOLPE</h1>
+            <p id="login-status" style="font-size:11px; margin-bottom:30px; opacity:0.7;">INFORME OS DADOS PARA SENTAR À MESA</p>
+            <input id="input-sala" placeholder="CÓDIGO DA SALA" style="background:#000; border:1px solid #333; color:white; padding:15px; width:100%; border-radius:10px; margin-bottom:10px; text-align:center;">
+            <input id="input-nome" placeholder="SEU APELIDO" style="background:#000; border:1px solid #333; color:white; padding:15px; width:100%; border-radius:10px; margin-bottom:20px; text-align:center;">
+            <button id="btn-entrar" class="btn-action" onclick="entrar()">ENTRAR</button>
+        </div>
+    </div>
+
+    <!-- TELA JOGO -->
+    <div id="screen-game" class="screen" style="padding:0">
+        <div id="ui-mesa">
+            <!-- PAINEL ESQUERDO -->
+            <div class="side-panel">
+                <div style="padding:15px; font-family:'Syncopate'; font-size:10px; color:var(--yellow);">RELATÓRIO DE GOLPES</div>
+                <div id="log-box"></div>
+                <div style="padding:15px; display:flex; gap:10px;">
+                    <button class="btn-action" style="background:#222; color:white; font-size:9px;" onclick="resetarJogo()">REINICIAR SALA</button>
+                </div>
+            </div>
+
+            <!-- ARENA CENTRAL -->
+            <div class="arena">
+                <div class="timer-center" id="global-timer">
+                    <div class="timer-val" id="timer-val">--</div>
+                    <div class="timer-label" id="timer-label">AGUARDANDO</div>
+                </div>
+                <div class="table-circle" id="adversarios-container"></div>
+                
+                <!-- OVERLAY DE REAÇÃO -->
+                <div id="action-ui" class="action-overlay">
+                    <h3 id="action-title" style="font-family:'Syncopate'; font-size:18px; color:var(--yellow); margin-bottom:10px;">TITULO</h3>
+                    <p id="action-desc" style="font-size:14px; color:#ccc; margin-bottom:25px;"></p>
+                    <div id="action-btns" style="display:flex; flex-direction:column; gap:10px;"></div>
+                </div>
+            </div>
+
+            <!-- PAINEL DIREITO -->
+            <div class="side-panel" style="padding:20px;">
+                <h3 style="font-family:'Syncopate'; font-size:10px; text-align:center; margin-bottom:20px; opacity:0.6;">AÇÕES DO TURNO</h3>
+                <div id="meu-menu-acoes" style="display:flex; flex-direction:column; gap:10px;">
+                    <button class="btn-action" id="btn-trabalhar" onclick="fazerAcao('trabalhar')">Fazer um Trampo (+1💰)</button>
+                    <button class="btn-action" id="btn-ajuda" onclick="fazerAcao('ajuda')">Imposto é Roubo (+2💰)</button>
+                    <button class="btn-action" id="btn-politico" onclick="fazerAcao('politico')">Faz o L (+3💰)</button>
+                    <button class="btn-action" id="btn-bicheiro" onclick="fazerAcao('bicheiro')">Puxar o Bicho (Roubar)</button>
+                    <button class="btn-action" id="btn-investigar" onclick="fazerAcao('investigar')">Acionar o X9 (Investigar)</button>
+                    <button class="btn-action btn-vasco" id="btn-bandido" onclick="fazerAcao('bandido')">Mandar pro Vasco (-3💰)</button>
+                </div>
+                <div id="status-turno-msg" style="text-align:center; margin-top:20px; font-size:11px; color:var(--yellow); display:none;">É A SUA VEZ!</div>
+                <div id="alerta-10" style="text-align:center; margin-top:15px; font-size:10px; color:var(--red); font-weight:700; display:none;">LIMITE DE 10💰 ATINGIDO! USE O VASCO.</div>
+            </div>
+
+            <!-- RODAPÉ -->
+            <div class="bottom-bar">
+                <div style="width:200px">
+                    <div style="font-size:11px; opacity:0.5; font-weight:700;">SALDO</div>
+                    <div id="my-coins" style="font-size:40px; font-weight:900; color:var(--gold);">💰 1</div>
+                </div>
+                <div class="my-hand" id="my-cards" style="display:flex; gap:15px;"></div>
+                <div style="width:200px; text-align:right">
+                    <div id="display-nome" style="font-family:'Syncopate'; font-size:14px; color:var(--yellow); font-weight:700;">JOGADOR</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const firebaseConfig = JSON.parse(__firebase_config);
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let salaID, jogadorID, alvoID = null;
+    let localCards = [];
+    let localCoins = 0;
+    let jogadoresCache = {};
+
+    const TRADUCAO = {
+        'trabalhar': 'Trampo', 'ajuda': 'Imposto', 'politico': 'Faz o L',
+        'bicheiro': 'Bicho', 'investigar': 'X9', 'bandido': 'Vasco'
+    };
+
+    function entrar() {
+        salaID = document.getElementById("input-sala").value.trim().toUpperCase();
+        let nome = document.getElementById("input-nome").value.trim();
+        if(!salaID || !nome) return;
+
+        db.ref(`salas/${salaID}`).once('value', snap => {
+            const data = snap.val();
+            // Bloqueia entrada se o jogo já estiver rolando
+            if(data && data.turnoAtual) {
+                document.getElementById("login-status").innerText = "JOGO EM ANDAMENTO. ESPERE A PRÓXIMA!";
+                document.getElementById("login-status").style.color = "var(--red)";
+                return;
+            }
+
+            jogadorID = "p_" + Date.now();
+            document.getElementById("display-nome").innerText = nome.toUpperCase();
+            document.getElementById("screen-login").classList.remove("active");
+            document.getElementById("screen-game").classList.add("active");
+
+            const baralho = ["Político", "Político", "Miliciano", "Miliciano", "Bandido", "Bandido", "X9", "X9", "Juiz", "Juiz"];
+            const c1 = baralho.splice(Math.floor(Math.random()*baralho.length), 1)[0];
+            const c2 = baralho.splice(Math.floor(Math.random()*baralho.length), 1)[0];
+
+            db.ref(`salas/${salaID}/jogadores/${jogadorID}`).set({
+                nome, moedas: 1, vivo: true, cartas: [c1, c2]
+            });
+
+            ouvir();
+        });
+    }
+
+    function ouvir() {
+        db.ref(`salas/${salaID}`).on("value", snap => {
+            const d = snap.val();
+            if(!d) return;
+            jogadoresCache = d.jogadores || {};
+            render(d);
+        });
+    }
+
+    function render(dados) {
+        const eu = jogadoresCache[jogadorID];
+        if(!eu) return;
+
+        localCards = eu.cartas || [];
+        localCoins = eu.moedas || 0;
+        document.getElementById("my-coins").innerText = `💰 ${localCoins}`;
+        document.getElementById("my-cards").innerHTML = localCards.map(c => `
+            <div class="card-large"><i class="fa-solid ${getIcon(c)}"></i><span style="font-size:10px">${c.toUpperCase()}</span></div>
+        `).join('');
+
+        // Render Adversários
+        const container = document.getElementById("adversarios-container");
+        container.innerHTML = "";
+        const outros = Object.keys(jogadoresCache).filter(id => id !== jogadorID);
+        outros.forEach((id, i) => {
+            const angle = (i / outros.length) * 2 * Math.PI - Math.PI/2;
+            const x = Math.cos(angle) * 240;
+            const y = Math.sin(angle) * 240;
+            const isTurn = dados.turnoAtual === id;
+            container.innerHTML += `
+                <div class="player-node" style="left: calc(50% + ${x}px - 90px); top: calc(50% + ${y}px - 60px)">
+                    <div class="node-box ${alvoID === id ? 'is-target' : ''} ${isTurn ? 'active-turn' : ''}" onclick="selecionarAlvo('${id}')">
+                        <div class="node-name">${jogadoresCache[id].nome}</div>
+                        <div class="node-coins">💰 ${jogadoresCache[id].moedas}</div>
+                    </div>
+                </div>
+            `;
+        });
+
+        // Interface de Ações e Timers
+        const acao = dados.acaoAtual;
+        const acaoAtiva = acao && !acao.finalizada;
+        const timerVal = document.getElementById("timer-val");
+        const timerLabel = document.getElementById("timer-label");
+
+        if(acaoAtiva) {
+            const diff = Math.ceil((acao.tempoFim - Date.now()) / 1000);
+            timerVal.innerText = Math.max(0, diff);
+            timerLabel.innerText = "REAÇÃO";
+            gestaoInterfaceReacao(acao);
+        } else if(dados.turnoAtual) {
+            const diffTurno = Math.ceil((dados.turnoFim - Date.now()) / 1000);
+            timerVal.innerText = Math.max(0, diffTurno);
+            timerLabel.innerText = "TURNO";
+            document.getElementById("action-ui").style.display = "none";
+        }
+
+        // Bloqueios de Menu
+        const isMyTurn = dados.turnoAtual === jogadorID;
+        const menu = document.getElementById("meu-menu-acoes");
+        const statusMsg = document.getElementById("status-turno-msg");
+        const alerta10 = document.getElementById("alerta-10");
+
+        if(isMyTurn && !acaoAtiva) {
+            menu.style.opacity = "1";
+            menu.style.pointerEvents = "all";
+            statusMsg.style.display = "block";
+            if(localCoins >= 10) {
+                ["btn-trabalhar", "btn-ajuda", "btn-politico", "btn-bicheiro", "btn-investigar"].forEach(id => document.getElementById(id).disabled = true);
+                alerta10.style.display = "block";
+            } else {
+                ["btn-trabalhar", "btn-ajuda", "btn-politico", "btn-bicheiro", "btn-investigar"].forEach(id => document.getElementById(id).disabled = false);
+                alerta10.style.display = "none";
+            }
+        } else {
+            menu.style.opacity = "0.3";
+            menu.style.pointerEvents = "none";
+            statusMsg.style.display = "none";
+        }
+
+        // X9 Privado para o Atacante
+        if(dados.x9_result && dados.x9_result.para === jogadorID) {
+            document.getElementById("x9-text").innerText = `${jogadoresCache[dados.x9_result.alvo].nome} mostrou a carta: ${dados.x9_result.carta}`;
+            document.getElementById("x9-result-popup").style.display = "block";
+            db.ref(`salas/${salaID}/x9_result`).remove();
+        }
+
+        // Logs
+        const logBox = document.getElementById("log-box");
+        if(dados.logs) {
+            logBox.innerHTML = Object.values(dados.logs).reverse().map(l => `<div class="log-msg">${l}</div>`).join('');
+        }
+    }
+
+    function selecionarAlvo(id) { alvoID = id; }
+
+    function fazerAcao(tipo) {
+        if(["bicheiro", "investigar", "bandido"].includes(tipo) && !alvoID) return alert("SELECIONE UM ALVO NA MESA!");
+
+        // Custos imediatos
+        if(tipo === 'bandido') {
+            if(localCoins < 3) return alert("PRECISA DE 3 MOEDAS!");
+            db.ref(`salas/${salaID}/jogadores/${jogadorID}/moedas`).transaction(m => Math.max(0, m - 3));
+        }
+
+        const acao = {
+            tipo, de: jogadorID, para: alvoID,
+            tempoFim: Date.now() + 15000, 
+            finalizada: false,
+            aceitos: {} // Lista de quem aceitou (clicou em ignorar)
+        };
+
+        db.ref(`salas/${salaID}/acaoAtual`).set(acao);
+        db.ref(`salas/${salaID}/logs`).push(`🚩 <b>${jogadoresCache[jogadorID].nome}</b> tentou <b>${TRADUCAO[tipo]}</b>!`);
+        
+        if(tipo === 'trabalhar') db.ref(`salas/${salaID}/acaoAtual/finalizada`).set(true);
+        alvoID = null;
+    }
+
+    function gestaoInterfaceReacao(acao) {
+        const ui = document.getElementById("action-ui");
+        const btns = document.getElementById("action-btns");
+        const autorNome = jogadoresCache[acao.de].nome;
+        const souAlvo = acao.para === jogadorID;
+        const souAutor = acao.de === jogadorID;
+        
+        if(souAutor) { ui.style.display = "none"; return; }
+
+        let mostrar = false;
+        btns.innerHTML = "";
+
+        // TELA UNIFICADA: Duvidar + Bloquear + Ignorar
+        if(acao.tipo === 'politico' || acao.tipo === 'ajuda') {
+            mostrar = true;
+            document.getElementById("action-title").innerText = TRADUCAO[acao.tipo].toUpperCase();
+            document.getElementById("action-desc").innerText = `${autorNome} está agindo. Você aceita ou contesta?`;
+            
+            btns.innerHTML += `<button class="btn-action btn-vasco" onclick="reagir('duvidar')">DUVIDAR</button>`;
+            if(acao.tipo === 'ajuda') btns.innerHTML += `<button class="btn-action btn-block" onclick="reagir('bloquear', 'Político')">BLOQUEAR (POLÍTICO)</button>`;
+            btns.innerHTML += `<button class="btn-action btn-pass" onclick="ignorarAcao()">IGNORAR (ACEITAR)</button>`;
+        } else if(souAlvo) {
+            mostrar = true;
+            document.getElementById("action-title").innerText = TRADUCAO[acao.tipo].toUpperCase();
+            document.getElementById("action-desc").innerText = `Você é o alvo de ${autorNome}. Defenda-se!`;
+            
+            btns.innerHTML += `<button class="btn-action btn-vasco" onclick="reagir('duvidar')">DUVIDAR</button>`;
+            if(acao.tipo === 'bandido' || acao.tipo === 'bicheiro') btns.innerHTML += `<button class="btn-action btn-block" onclick="reagir('bloquear', 'Miliciano')">BLOQUEAR (MILICIANO)</button>`;
+            if(acao.tipo === 'investigar') btns.innerHTML += `<button class="btn-action btn-block" onclick="reagir('bloquear', 'Juiz')">BLOQUEAR (JUIZ)</button>`;
+            btns.innerHTML += `<button class="btn-action btn-pass" onclick="ignorarAcao()">IGNORAR (ACEITAR)</button>`;
+        }
+
+        if(mostrar) ui.style.display = "block";
+    }
+
+    function reagir(modo, personagem = "") {
+        const autorID = jogadoresCache[jogadorID].acaoAtual_autor || ""; // Placeholder
+        const piadas = ["O golpe tá aí, cai quem quer!", "Aqui não, violão!", "Tentou a sorte mas o azar é certo.", "Malandro demais o bicho come."];
+        const piada = piadas[Math.floor(Math.random()*piadas.length)];
+
+        db.ref(`salas/${salaID}/acaoAtual`).update({ finalizada: true, contestada: true });
+        db.ref(`salas/${salaID}/logs`).push(`🔥 <b>${jogadoresCache[jogadorID].nome}</b> reagiu! <i>"${piada}"</i>`);
+        document.getElementById("action-ui").style.display = "none";
+    }
+
+    function ignorarAcao() {
+        db.ref(`salas/${salaID}/acaoAtual/aceitos/${jogadorID}`).set(true);
+        document.getElementById("action-ui").style.display = "none";
+    }
+
+    function abrirSeletorCarta(titulo, modo, extras = {}) {
+        const modal = document.getElementById("card-selector-modal");
+        const container = document.getElementById("selector-cards-container");
+        document.getElementById("selector-title").innerText = titulo;
+        container.innerHTML = "";
+        
+        localCards.forEach((c, i) => {
+            const div = document.createElement("div");
+            div.className = "card-large";
+            div.innerHTML = `<i class="fa-solid ${getIcon(c)}"></i><span>${c}</span>`;
+            div.onclick = () => {
+                if(modo === "perder") {
+                    let n = [...localCards]; n.splice(i, 1);
+                    db.ref(`salas/${salaID}/jogadores/${jogadorID}/cartas`).set(n);
+                } else if(modo === "x9_show") {
+                    db.ref(`salas/${salaID}/x9_result`).set({ para: extras.para, alvo: jogadorID, carta: c });
+                }
+                modal.style.display = "none";
+            };
+            container.appendChild(div);
+        });
+        modal.style.display = "flex";
+    }
+
+    function resetarJogo() {
+        if(confirm("LIMPAR A SALA E REINICIAR TUDO?")) {
+            db.ref(`salas/${salaID}`).remove();
+            location.reload();
+        }
+    }
+
+    // SIMULAÇÃO DE SERVIDOR
+    setInterval(() => {
+        db.ref(`salas/${salaID}`).once('value', snap => {
+            const d = snap.val();
+            if(!d || !d.jogadores) return;
+
+            // Logica do Politico (Todos aceitarem)
+            if(d.acaoAtual && !d.acaoAtual.finalizada) {
+                const acao = d.acaoAtual;
+                if(acao.tipo === 'politico' || acao.tipo === 'ajuda') {
+                    const aceitosCount = Object.keys(acao.aceitos || {}).length;
+                    const totalAdversarios = Object.keys(d.jogadores).length - 1;
+                    if(aceitosCount >= totalAdversarios) concluirAcao(acao, d);
+                }
+                // Se passou o tempo
+                if(Date.now() > acao.tempoFim) concluirAcao(acao, d);
+                return;
+            }
+
+            // Inicia Turno
+            if(!d.turnoFim) {
+                db.ref(`salas/${salaID}`).update({
+                    turnoAtual: Object.keys(d.jogadores)[0],
+                    turnoFim: Date.now() + 30000
+                });
+                return;
+            }
+
+            // Próximo Turno
+            if(Date.now() > d.turnoFim) passarTurno(d);
+        });
+    }, 1500);
+
+    function concluirAcao(acao, dados) {
+        if(acao.contestada) { 
+            db.ref(`salas/${salaID}/acaoAtual/finalizada`).set(true); 
+            return; 
+        }
+
+        const deRef = db.ref(`salas/${salaID}/jogadores/${acao.de}`);
+        if(acao.tipo === 'trabalhar') deRef.child("moedas").transaction(m => Math.min(10, (m || 0) + 1));
+        if(acao.tipo === 'ajuda') deRef.child("moedas").transaction(m => Math.min(10, (m || 0) + 2));
+        if(acao.tipo === 'politico') deRef.child("moedas").transaction(m => Math.min(10, (m || 0) + 3));
+        
+        if(acao.tipo === 'bandido' && acao.para === jogadorID) abrirSeletorCarta("PERDER UMA CARTA", "perder");
+        if(acao.tipo === 'investigar' && acao.para === jogadorID) abrirSeletorCarta("X9: QUAL CARTA MOSTRAR?", "x9_show", { para: acao.de });
+
+        db.ref(`salas/${salaID}/acaoAtual/finalizada`).set(true);
+    }
+
+    function passarTurno(dados) {
+        const jids = Object.keys(dados.jogadores);
+        const cur = jids.indexOf(dados.turnoAtual);
+        const next = jids[(cur + 1) % jids.length];
+        db.ref(`salas/${salaID}`).update({
+            turnoAtual: next, turnoFim: Date.now() + 30000, acaoAtual: null
+        });
+    }
+
+    function getIcon(c) {
+        const icons = {"Político":"fa-user-tie", "Miliciano":"fa-shield-halved", "Bandido":"fa-skull", "X9":"fa-mask", "Juiz":"fa-gavel"};
+        return icons[c] || "fa-id-card";
+    }
+</script>
+</body>
+</html>

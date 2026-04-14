@@ -30,11 +30,33 @@ function getCardIcon(carta: string): string {
   return PERSONAGEM_INFO[carta]?.icon || "fa-id-card";
 }
 
+const PIADAS_DUVIDAR = [
+  "O golpe tá aí, cai quem quer!",
+  "Aqui não, violão!",
+  "Malandro demais o bicho come.",
+  "Tentou a sorte mas o azar é certo.",
+  "Blefe detectado, sistema antifraude ativado!",
+  "Para! Isso é uma emboscada!",
+];
+
+const PIADAS_PERDA = [
+  "Mais um que caiu no conto do vigário.",
+  "Assim não dá, meu parceiro.",
+  "A conta chegou.",
+  "Quem vive de blefe, morre de vergonha.",
+  "Era um bom soldado.",
+];
+
+function piada(arr: string[]) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 export default function Mesa({ minhaInfo }: MesaProps) {
   const [sala, setSala] = useState<Sala | null>(null);
   const [alvoId, setAlvoId] = useState<string | null>(null);
   const [timerPercent, setTimerPercent] = useState(100);
   const [tempoRestante, setTempoRestante] = useState(30);
+  const [x9Popup, setX9Popup] = useState<{ alvoNome: string; carta: string } | null>(null);
   const executandoRef = useRef(false);
 
   // ─── Core helpers ────────────────────────────────────────
@@ -138,17 +160,17 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       const cartaNecessaria = ["Investigar", "Trocar", "Disfarce"].includes(a.tipo) ? "X9" : a.tipo;
       const temCarta = (d.jogadores![a.autorId].cartas || []).includes(cartaNecessaria);
       if (temCarta) {
-        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou mas ${d.jogadores![a.autorId]?.nome} tinha ${cartaNecessaria}!`);
+        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou mas ${d.jogadores![a.autorId]?.nome} tinha o ${cartaNecessaria}! "${piada(PIADAS_DUVIDAR)}"`);
         await entrarFasePerda(minhaInfo.id);
       } else {
-        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou! ${d.jogadores![a.autorId]?.nome} tava blefando!`);
+        await adicionarLog(`🤔 ${minhaInfo.nome} duvidou! ${d.jogadores![a.autorId]?.nome} tava blefando! "${piada(PIADAS_DUVIDAR)}"`);
         await entrarFasePerda(a.autorId);
       }
       return;
     }
 
     if (tipo === "BLOQUEIO" && char) {
-      await adicionarLog(`🛡️ ${minhaInfo.nome} bloqueou com ${char}`);
+      await adicionarLog(`🛡️ ${minhaInfo.nome} bloqueou com ${char}! Espera que isso cheira a blefe...`);
       await update(ref(db, `salas/${minhaInfo.sala}`), {
         fase: "DUVIDA_BLOQUEIO", bloqueadorId: minhaInfo.id,
         bloqueadorPersonagem: char, votos: null,
@@ -198,10 +220,15 @@ export default function Mesa({ minhaInfo }: MesaProps) {
 
   useEffect(() => {
     const unsub = onValue(ref(db, `salas/${minhaInfo.sala}`), (snap) => {
-      setSala(snap.val() as Sala);
+      const data = snap.val() as Sala;
+      setSala(data);
+      if (data?.x9Privado && data.x9Privado.para === minhaInfo.id) {
+        setX9Popup({ alvoNome: data.x9Privado.alvoNome, carta: data.x9Privado.carta });
+        set(ref(db, `salas/${minhaInfo.sala}/x9Privado`), null);
+      }
     });
     return () => unsub();
-  }, [minhaInfo.sala]);
+  }, [minhaInfo.sala, minhaInfo.id]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -240,7 +267,7 @@ export default function Mesa({ minhaInfo }: MesaProps) {
     const perdida = cartas[idx];
     cartas.splice(idx, 1);
     await set(ref(db, `salas/${minhaInfo.sala}/jogadores/${minhaInfo.id}/cartas`), cartas);
-    await adicionarLog(`💀 ${minhaInfo.nome} perdeu ${perdida}`);
+    await adicionarLog(`💀 ${minhaInfo.nome} perdeu ${perdida}. ${piada(PIADAS_PERDA)}`);
     await update(ref(db, `salas/${minhaInfo.sala}`), { fase: "ACAO", quemPerde: null });
     await passarTurno();
   }
@@ -248,9 +275,14 @@ export default function Mesa({ minhaInfo }: MesaProps) {
   async function revelarParaX9(carta: string) {
     const snap = await get(ref(db, `salas/${minhaInfo.sala}`));
     const d = snap.val() as Sala;
-    const autorNome = d.jogadores?.[d.acaoPendente?.autorId!]?.nome || "X9";
-    await adicionarLog(`🕵️ ${autorNome} viu: ${carta} (carta de ${minhaInfo.nome})`);
-    await update(ref(db, `salas/${minhaInfo.sala}`), { fase: "ACAO", acaoPendente: null });
+    const autorId = d.acaoPendente?.autorId;
+    const autorNome = d.jogadores?.[autorId!]?.nome || "X9";
+    await adicionarLog(`🕵️ ${minhaInfo.nome} mostrou uma carta para ${autorNome}... eles sabem de tudo agora.`);
+    await update(ref(db, `salas/${minhaInfo.sala}`), {
+      fase: "ACAO",
+      acaoPendente: null,
+      x9Privado: { para: autorId, alvoNome: minhaInfo.nome, carta },
+    });
     await passarTurno();
   }
 
@@ -271,7 +303,11 @@ export default function Mesa({ minhaInfo }: MesaProps) {
       fase, timerFinal: Date.now() + 10000, votos: {},
     });
     const d = ACAO_DISPLAY[tipo];
-    await adicionarLog(`▶ ${minhaInfo.nome} usou ${d?.label || tipo}`);
+    const alvoNome = alvoId ? (await get(ref(db, `salas/${minhaInfo.sala}/jogadores/${alvoId}/nome`))).val() : null;
+    const logMsg = alvoNome
+      ? `🚩 ${minhaInfo.nome} tentou ${d?.label || tipo} em ${alvoNome}!`
+      : `🚩 ${minhaInfo.nome} tentou ${d?.label || tipo}!`;
+    await adicionarLog(logMsg);
     if (fase === "EXECUCAO") await executarEfeito();
   }
 

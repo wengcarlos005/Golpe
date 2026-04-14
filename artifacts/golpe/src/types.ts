@@ -26,6 +26,7 @@ export interface Sala {
   bloqueadorId?: string | null;
   bloqueadorPersonagem?: string | null;
   votos?: Record<string, string> | null;
+  x9Privado?: { para: string; alvoNome: string; carta: string } | null;
 }
 
 export interface MinhaInfo {
